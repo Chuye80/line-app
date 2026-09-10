@@ -1,23 +1,19 @@
-import os
+from __future__ import annotations
 
-from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+from backend.config import get_settings
 
-load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    raise RuntimeError(
-        "DATABASE_URL is not set. Add it to the project .env file."
-    )
-
+_settings = get_settings()
 
 engine = create_engine(
-    DATABASE_URL,
+    _settings.database_url,
     pool_pre_ping=True,
+    pool_size=_settings.db_pool_size,
+    max_overflow=_settings.db_max_overflow,
+    pool_recycle=1800,
 )
 
 
@@ -36,6 +32,10 @@ def get_db():
 
     try:
         yield db
-
+    except Exception:
+        # Without this an endpoint that raises leaves a half-applied
+        # transaction on a pooled connection for the next request to inherit.
+        db.rollback()
+        raise
     finally:
         db.close()
