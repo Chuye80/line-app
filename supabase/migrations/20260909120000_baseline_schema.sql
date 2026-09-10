@@ -12,6 +12,78 @@
 create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
+-- Reconcile tables left over from an earlier shape of the app
+--
+-- `create table if not exists` skips a table that already exists whatever
+-- shape it is in, so a project carried over from an older version can satisfy
+-- everything below and still be missing columns the later migrations depend
+-- on. The symptom is obscure: the baseline reports success and the *next*
+-- migration fails on something like `column keep.game_id does not exist`.
+--
+-- An empty leftover table holds nothing worth keeping, so it is dropped here
+-- and recreated correctly by the statements that follow. A table with rows in
+-- it is a different matter - which column of an unknown shape corresponds to
+-- which is not something to guess at when there is data behind the answer - so
+-- that stops the migration with a message naming the table and the columns.
+-- ---------------------------------------------------------------------------
+
+do $$
+declare
+    required jsonb := '{
+        "profiles":         ["id", "display_name", "created_at"],
+        "groups":           ["id", "name", "created_by", "created_at"],
+        "memberships":      ["id", "group_id", "user_id", "display_name",
+                             "rating", "is_subscriber", "is_admin", "created_at"],
+        "join_requests":    ["id", "group_id", "user_id", "status", "created_at"],
+        "games":            ["id", "group_id", "game_datetime",
+                             "regular_registration_opens", "created_at"],
+        "registrations":    ["id", "game_id", "membership_id", "status", "created_at"],
+        "team_assignments": ["id", "game_id", "membership_id", "team_name"]
+    }'::jsonb;
+    tbl text;
+    absent text[];
+    rows_present bigint;
+begin
+    for tbl in select jsonb_object_keys(required) loop
+        if to_regclass('public.' || quote_ident(tbl)) is null then
+            continue;
+        end if;
+
+        select array_agg(expected.name order by expected.name)
+        into absent
+        from jsonb_array_elements_text(required -> tbl) as expected (name)
+        where not exists (
+            select 1
+            from information_schema.columns c
+            where c.table_schema = 'public'
+              and c.table_name = tbl
+              and c.column_name = expected.name
+        );
+
+        if absent is null then
+            continue;
+        end if;
+
+        execute format('select count(*) from public.%I', tbl) into rows_present;
+
+        if rows_present > 0 then
+            raise exception
+                'public.% has % row(s) but is missing the column(s) %. It predates '
+                'this schema and cannot be reconciled automatically without deciding '
+                'where that data belongs. Inspect it with scripts/inspect_schema.py.',
+                tbl, rows_present, array_to_string(absent, ', ');
+        end if;
+
+        raise notice
+            'public.% is empty and missing %; recreating it to match the migrations.',
+            tbl, array_to_string(absent, ', ');
+
+        execute format('drop table public.%I cascade', tbl);
+    end loop;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- profiles
 -- ---------------------------------------------------------------------------
 
