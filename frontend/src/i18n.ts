@@ -17,8 +17,10 @@ export const translations: Record<Language, Record<string, string>> = {
     hebrew: "עברית",
     loginSubtitle: "Sign in to your football groups",
     signupSubtitle: "Create your LineApp account",
-    accountCreated:
-      "Account created. If email confirmation is enabled, confirm your email and then log in.",
+    confirmEmail:
+      "Account created. Check your email and confirm it before logging in.",
+    accountNotCreated:
+      "No new account was created. This email may already be registered; confirm the existing account or use another email.",
     myGroups: "My Groups",
     memberships: "memberships",
     newGroupName: "New group name",
@@ -185,8 +187,10 @@ export const translations: Record<Language, Record<string, string>> = {
     hebrew: "עברית",
     loginSubtitle: "התחברו לקבוצות הכדורגל שלכם",
     signupSubtitle: "צרו חשבון LineApp",
-    accountCreated:
-      "החשבון נוצר. אם נדרש אישור במייל, אשרו ואז התחברו.",
+    confirmEmail:
+      "החשבון נוצר. בדקו את המייל ואשרו את החשבון לפני ההתחברות.",
+    accountNotCreated:
+      "לא נוצר חשבון חדש. ייתכן שהמייל כבר רשום; אשרו את החשבון הקיים או השתמשו במייל אחר.",
     myGroups: "הקבוצות שלי",
     memberships: "חברויות",
     newGroupName: "שם קבוצה חדשה",

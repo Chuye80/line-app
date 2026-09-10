@@ -819,22 +819,30 @@ function App() {
     setLoading(true);
     setError("");
     try {
+      const normalizedEmail = email.trim();
       if (authMode === "signup") {
-        const { error: signUpError } = await supabase.auth.signUp({
-          email,
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: normalizedEmail,
           password,
           options: {
+            emailRedirectTo: window.location.origin,
             data: {
-              display_name: displayName.trim() || email.split("@")[0],
+              display_name:
+                displayName.trim() || normalizedEmail.split("@")[0],
             },
           },
         });
         if (signUpError) throw signUpError;
-        setError(t("accountCreated"));
+        if (!data.session) {
+          if (!data.user || data.user.identities?.length === 0) {
+            throw new Error(t("accountNotCreated"));
+          }
+          setError(t("confirmEmail"));
+        }
         setAuthMode("login");
       } else {
         const { error: loginError } = await supabase.auth.signInWithPassword({
-          email,
+          email: normalizedEmail,
           password,
         });
         if (loginError) throw loginError;
