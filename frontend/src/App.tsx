@@ -848,7 +848,17 @@ function App() {
         if (loginError) throw loginError;
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed");
+      const authCode =
+        err && typeof err === "object" && "code" in err
+          ? String(err.code)
+          : "";
+      setError(
+        authCode === "over_email_send_rate_limit"
+          ? t("signupRateLimited")
+          : err instanceof Error
+            ? err.message
+            : "Authentication failed"
+      );
     } finally {
       setLoading(false);
     }

@@ -21,6 +21,8 @@ export const translations: Record<Language, Record<string, string>> = {
       "Account created. Check your email and confirm it before logging in.",
     accountNotCreated:
       "No new account was created. This email may already be registered; confirm the existing account or use another email.",
+    signupRateLimited:
+      "Confirmation email limit reached. Please wait before trying again.",
     myGroups: "My Groups",
     memberships: "memberships",
     newGroupName: "New group name",
@@ -191,6 +193,8 @@ export const translations: Record<Language, Record<string, string>> = {
       "החשבון נוצר. בדקו את המייל ואשרו את החשבון לפני ההתחברות.",
     accountNotCreated:
       "לא נוצר חשבון חדש. ייתכן שהמייל כבר רשום; אשרו את החשבון הקיים או השתמשו במייל אחר.",
+    signupRateLimited:
+      "הגעתם למגבלת שליחת מיילים לאישור. המתינו לפני ניסיון נוסף.",
     myGroups: "הקבוצות שלי",
     memberships: "חברויות",
     newGroupName: "שם קבוצה חדשה",
