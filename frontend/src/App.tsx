@@ -5,7 +5,11 @@ import "./App.css";
 import { supabase } from "./supabase";
 import { translations, type Language } from "./i18n";
 
-const API_URL = "http://127.0.0.1:8000";
+const API_URL =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ??
+  "http://127.0.0.1:8000";
+const DEV_TOOLS_ENABLED =
+  import.meta.env.VITE_ENABLE_DEV_TOOLS === "true";
 const LANG_KEY = "lineapp.lang";
 
 type Member = {
@@ -1096,7 +1100,7 @@ function App() {
       </header>
 
       <div className="page-layout">
-        {isDeveloper && (
+        {isDeveloper && DEV_TOOLS_ENABLED && (
           <aside className="developer-panel">
             <h3>{t("developerTools")}</h3>
             <button

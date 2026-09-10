@@ -41,6 +41,12 @@ from backend.team_generator import generate_balanced_teams
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+ENABLE_DEV_ENDPOINTS = os.getenv("ENABLE_DEV_ENDPOINTS", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 if not SUPABASE_URL or not SUPABASE_PUBLISHABLE_KEY:
     raise RuntimeError(
@@ -50,12 +56,16 @@ if not SUPABASE_URL or not SUPABASE_PUBLISHABLE_KEY:
 
 app = FastAPI(title="LineApp API")
 
+cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+if FRONTEND_URL not in cors_origins:
+    cors_origins.append(FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -248,6 +258,9 @@ def is_developer(db: Session, user_id: UUID) -> bool:
 
 
 def require_developer(db: Session, user: CurrentUser) -> None:
+    if not ENABLE_DEV_ENDPOINTS:
+        # Do not advertise remotely disabled test helpers through a 403.
+        raise HTTPException(status_code=404, detail="Not found")
     if not is_developer(db, user.id):
         raise HTTPException(status_code=403, detail="Developer access required")
 
@@ -1017,7 +1030,7 @@ def group_to_dict(
     }
     if include_invite:
         result["invite_code"] = group.invite_code
-        result["invite_link"] = f"http://127.0.0.1:5173/?invite={group.invite_code}"
+        result["invite_link"] = f"{FRONTEND_URL}/?invite={group.invite_code}"
     return result
 
 
@@ -1280,7 +1293,7 @@ def regenerate_invite(
     db.commit()
     return {
         "invite_code": group.invite_code,
-        "invite_link": f"http://127.0.0.1:5173/?invite={group.invite_code}",
+        "invite_link": f"{FRONTEND_URL}/?invite={group.invite_code}",
     }
 
 
