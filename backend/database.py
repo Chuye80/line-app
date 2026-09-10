@@ -16,9 +16,8 @@ if not DATABASE_URL:
 
 
 _ENGINE_KWARGS = {
-    "pool_pre_ping": False,
+    "pool_pre_ping": True,
     "pool_recycle": 600,
-    "pool_reset_on_return": None,
     "connect_args": {
         "keepalives": 1,
         "keepalives_idle": 30,
