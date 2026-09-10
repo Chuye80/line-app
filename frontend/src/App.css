@@ -649,3 +649,217 @@ button:disabled {
   border: 1px solid #d1d5db;
   border-radius: 8px;
 }
+
+/* --- Game day celebration ------------------------------------------------ */
+
+/* The end of a game day is the one moment the app should feel like an event,
+   so the champion card is given more presence than the cards around it. */
+.celebration-card {
+  text-align: center;
+  background: linear-gradient(160deg, #fffdf5 0%, #fff7e0 100%);
+  border: 1px solid #f2d98c;
+}
+
+.celebration-card .trophy {
+  font-size: 56px;
+  line-height: 1;
+  margin-bottom: 4px;
+  animation: trophy-pop 620ms cubic-bezier(0.2, 0.9, 0.3, 1.4) both;
+}
+
+.celebration-card h2 {
+  margin: 0;
+}
+
+.celebration-card .champion-squad {
+  margin: 0;
+  font-weight: 600;
+  color: #7a5b12;
+}
+
+.celebration-card .standings-list {
+  margin: 4px auto 0;
+  padding-top: 12px;
+  border-top: 1px solid #f0e2b8;
+  max-width: 420px;
+}
+
+.celebration-card .standings-list p {
+  margin: 4px 0;
+}
+
+@keyframes trophy-pop {
+  from {
+    transform: scale(0.4) rotate(-12deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .celebration-card .trophy {
+    animation: none;
+  }
+}
+
+/* --- Live game day board --- */
+
+.live-board {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.live-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #b3261e;
+}
+
+.live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e5372a;
+  box-shadow: 0 0 0 0 rgba(229, 55, 42, 0.7);
+  animation: live-pulse 1.8s infinite;
+}
+
+.live-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.goal-row {
+  align-items: flex-end;
+}
+
+@keyframes live-pulse {
+  70% {
+    box-shadow: 0 0 0 12px rgba(229, 55, 42, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 55, 42, 0);
+  }
+}
+
+/* --- Developer simulation --- */
+
+.simulation-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 10px 16px;
+  border: 1px dashed #8a6d3b;
+  border-radius: 10px;
+  background: #fff8e1;
+  color: #6b5320;
+}
+
+.view-as {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+/* --- Half-step star rating --- */
+
+.survey-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.survey-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  border-bottom: 1px solid #eceef2;
+}
+
+.survey-name {
+  font-weight: 600;
+}
+
+.star-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.star {
+  position: relative;
+  display: inline-block;
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.star-hit {
+  position: absolute;
+  top: 0;
+  z-index: 1;
+  width: 50%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.star-hit.left {
+  left: 0;
+}
+
+.star-hit.right {
+  right: 0;
+}
+
+.star-glyph {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: #d3d7de;
+}
+
+.star-glyph.full {
+  color: #f5b301;
+}
+
+/* Paint only the leading half of the glyph for a half step. */
+.star-glyph.half {
+  background: linear-gradient(90deg, #f5b301 50%, #d3d7de 50%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+[dir="rtl"] .star-glyph.half {
+  background: linear-gradient(270deg, #f5b301 50%, #d3d7de 50%);
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+.star-value {
+  min-width: 2.5rem;
+  margin-inline-start: 8px;
+  font-variant-numeric: tabular-nums;
+  color: #5c6270;
+}

@@ -126,7 +126,7 @@ class MvpVoteRequest(BaseModel):
 
 
 class SurveyRatingsRequest(BaseModel):
-    ratings: dict[str, int]
+    ratings: dict[str, float]
 
 
 _AUTH_CACHE: dict[str, tuple[float, CurrentUser]] = {}
@@ -162,9 +162,11 @@ def is_real(membership: Membership) -> bool:
     return membership.user_id is not None
 
 
-def get_current_user(
+def get_authenticated_user(
     authorization: str | None = Header(default=None),
 ) -> CurrentUser:
+    """The account that actually signed in. Never affected by simulation."""
+
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -199,6 +201,42 @@ def get_current_user(
             for key in expired:
                 _AUTH_CACHE.pop(key, None)
         return user
+
+
+def get_current_user(
+    real_user: CurrentUser = Depends(get_authenticated_user),
+    x_dev_act_as: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> CurrentUser:
+    """The account the request should be answered as.
+
+    Developers can ask to see the app through another member's eyes by sending
+    that member's id in `X-Dev-Act-As`. Nothing about the real session changes:
+    the token, its cache entry and the developer's own account are untouched,
+    and the substitution lasts exactly one request. Because every endpoint
+    already depends on this function, the simulation applies everywhere at once
+    instead of each endpoint having to know about it.
+    """
+
+    if not x_dev_act_as:
+        return real_user
+    if not is_developer(db, real_user.id):
+        raise HTTPException(status_code=403, detail="Developer access required")
+    try:
+        membership_id = UUID(x_dev_act_as)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="X-Dev-Act-As must be a membership id"
+        ) from exc
+    membership = db.get(Membership, membership_id)
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    if membership.user_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="A virtual player has no account to view the app as",
+        )
+    return CurrentUser(id=membership.user_id, email=None)
 
 
 def is_developer(db: Session, user_id: UUID) -> bool:
@@ -658,6 +696,8 @@ def read_group_payload(group_id: UUID, user_id: UUID) -> dict:
             detail="You are not a member of this group",
         )
     attach_standings(payload.get("game_day"))
+    # The finished day carries the final table, so it needs standings too.
+    attach_standings(payload.get("finished_game_day"))
     return payload
 
 
@@ -1031,7 +1071,13 @@ def me(user: CurrentUser = Depends(get_current_user)):
 
 
 @app.get("/bootstrap")
-def bootstrap(user: CurrentUser = Depends(get_current_user)):
+def bootstrap(
+    user: CurrentUser = Depends(get_current_user),
+    real_user: CurrentUser = Depends(get_authenticated_user),
+):
+    # Developer status is read from the account that signed in, not the one
+    # being simulated, so stepping into a normal member's shoes never locks the
+    # developer out of the control that steps back again.
     return fetch_json(
         """
         SELECT jsonb_build_object(
@@ -1042,8 +1088,9 @@ def bootstrap(user: CurrentUser = Depends(get_current_user)):
             'Player'
           ),
           'is_developer', exists(
-            SELECT 1 FROM developers WHERE user_id = CAST(:uid AS uuid)
+            SELECT 1 FROM developers WHERE user_id = CAST(:real_uid AS uuid)
           ),
+          'is_simulated', CAST(:uid AS uuid) <> CAST(:real_uid AS uuid),
           'groups', coalesce((
             SELECT jsonb_agg(
               jsonb_build_object(
@@ -1062,7 +1109,7 @@ def bootstrap(user: CurrentUser = Depends(get_current_user)):
           ), '[]'::jsonb)
         )
         """,
-        {"uid": str(user.id), "email": user.email},
+        {"uid": str(user.id), "email": user.email, "real_uid": str(real_user.id)},
     )
 
 
@@ -1737,6 +1784,9 @@ def complete_match(
     db.refresh(match)
     caller = membership_for_user(db, group.id, user.id)
     return serialize_game_day(db, game_day, caller)
+
+
+@app.post("/groups/{group_id}/game-days/{game_day_id}/finish")
 def finish_game_day(
     group_id: UUID,
     game_day_id: UUID,
@@ -1949,13 +1999,21 @@ def submit_survey_ratings(
         raise HTTPException(status_code=404, detail="Survey not found")
     if survey.status != "open":
         raise HTTPException(status_code=400, detail="This survey is closed")
-    real_ids = {item.id for item in group.memberships if is_real(item) and item.id != membership.id}
+    # Everyone in the group can be rated except the rater. Virtual players are
+    # included because their rating is what balances the teams they play in.
+    ratable_ids = {item.id for item in group.memberships if item.id != membership.id}
     for key, value in request.ratings.items():
         rated_id = UUID(key)
-        if rated_id not in real_ids:
+        if rated_id not in ratable_ids:
             continue
         if value < 1 or value > 5:
             raise HTTPException(status_code=400, detail="Ratings must be between 1 and 5")
+        # Half stars only: doubling a permitted value lands on a whole number.
+        if (value * 2) % 1 != 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Ratings must be given in steps of 0.5",
+            )
         existing = (
             db.query(RatingSurveyResponse)
             .filter(
@@ -1995,12 +2053,12 @@ def close_survey(
         raise HTTPException(status_code=404, detail="Survey not found")
     if survey.status != "open":
         raise HTTPException(status_code=400, detail="Survey already closed")
-    totals: dict[UUID, list[int]] = defaultdict(list)
+    totals: dict[UUID, list[Decimal]] = defaultdict(list)
     for response in survey.responses:
         totals[response.rated_membership_id].append(response.rating)
     for membership_id, values in totals.items():
         membership = db.get(Membership, membership_id)
-        if membership is None or not is_real(membership):
+        if membership is None:
             continue
         average = sum(values) / len(values)
         rounded = Decimal(str(average)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)

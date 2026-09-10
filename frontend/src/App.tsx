@@ -94,6 +94,8 @@ type Group = {
   last_players_per_team: number;
   members: Member[];
   game_day: GameDay | null;
+  /** The last finished day, present only while no new day has been created. */
+  finished_game_day: GameDay | null;
   history: {
     id: string;
     game_datetime: string;
@@ -137,6 +139,56 @@ type StatRow = Member & {
   mvp_titles: number;
 };
 
+const RATING_STEPS = [1, 2, 3, 4, 5];
+
+function StarRating({
+  value,
+  onChange,
+  label,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  label: string;
+}) {
+  return (
+    <div className="star-rating" role="group" aria-label={label}>
+      {RATING_STEPS.map((star) => {
+        const half = star - 0.5;
+        const fill = value >= star ? "full" : value >= half ? "half" : "empty";
+        return (
+          <span className="star" key={star}>
+            <button
+              type="button"
+              className="star-hit left"
+              aria-label={`${label}: ${half.toFixed(1)}`}
+              aria-pressed={value === half}
+              onClick={() => onChange(half)}
+            />
+            <button
+              type="button"
+              className="star-hit right"
+              aria-label={`${label}: ${star.toFixed(1)}`}
+              aria-pressed={value === star}
+              onClick={() => onChange(star)}
+            />
+            <span className={`star-glyph ${fill}`} aria-hidden="true">
+              ★
+            </span>
+          </span>
+        );
+      })}
+      <span className="star-value">{value ? value.toFixed(1) : "—"}</span>
+    </div>
+  );
+}
+
+/** Where the simulated identity lives: per tab, and never in the auth session. */
+const ACT_AS_KEY = "lineapp.viewAs";
+
+function loadActAs(): string | null {
+  return sessionStorage.getItem(ACT_AS_KEY);
+}
+
 function loadLang(): Language {
   const saved = localStorage.getItem(LANG_KEY);
   return saved === "he" ? "he" : "en";
@@ -153,6 +205,10 @@ function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [isDeveloper, setIsDeveloper] = useState(false);
+  // The whole of "view app as" is these two values plus one request header.
+  // Everything downstream just reads the group payload the server sends back.
+  const [actAs, setActAs] = useState<string | null>(loadActAs);
+  const [simulatedName, setSimulatedName] = useState("");
 
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [displayName, setDisplayName] = useState("");
@@ -174,6 +230,10 @@ function App() {
   );
   const [stats, setStats] = useState<StatRow[]>([]);
   const [tab, setTab] = useState<"group" | "stats">("group");
+  const [statsScope, setStatsScope] = useState<"day" | "overall">("overall");
+  const [liveTab, setLiveTab] = useState<
+    "matches" | "standings" | "stats" | "teams"
+  >("matches");
 
   const [newGroupName, setNewGroupName] = useState("");
   const [showMemberForm, setShowMemberForm] = useState(false);
@@ -221,6 +281,44 @@ function App() {
     [group, membership?.membership_id]
   );
 
+  // Statistics for the single day being played or just finished. These are
+  // read straight off that day's matches rather than kept alongside the
+  // career totals, so the two can never drift apart.
+  const dayStats = useMemo(() => {
+    const day = group?.game_day ?? group?.finished_game_day ?? null;
+    if (!day) return [];
+    const rows = new Map<
+      string,
+      { member: Member; played: number; goals: number; assists: number }
+    >();
+    const rowFor = (member: Member) => {
+      const existing = rows.get(member.id);
+      if (existing) return existing;
+      const created = { member, played: 0, goals: 0, assists: 0 };
+      rows.set(member.id, created);
+      return created;
+    };
+    day.participants.forEach(rowFor);
+    day.matches.forEach((match) => {
+      if (match.status === "completed") {
+        match.players.forEach((player) => {
+          rowFor(player).played += 1;
+        });
+      }
+      match.goals.forEach((goal) => {
+        rowFor(goal.scorer).goals += 1;
+        if (goal.assist) rowFor(goal.assist).assists += 1;
+      });
+    });
+    return [...rows.values()].sort(
+      (a, b) =>
+        b.goals - a.goals ||
+        b.assists - a.assists ||
+        b.played - a.played ||
+        a.member.name.localeCompare(b.member.name)
+    );
+  }, [group?.game_day, group?.finished_game_day]);
+
   useEffect(() => {
     document.documentElement.lang = lang === "he" ? "he" : "en";
     document.documentElement.dir = lang === "he" ? "rtl" : "ltr";
@@ -232,7 +330,21 @@ function App() {
     if (!token) throw new Error("No active session");
     const headers = new Headers(options.headers);
     headers.set("Authorization", `Bearer ${token}`);
+    // The real bearer token always travels as-is; the simulation is a separate
+    // hint the server is free to refuse.
+    if (actAs) headers.set("X-Dev-Act-As", actAs);
     return fetch(`${API_URL}${path}`, { ...options, headers });
+  }
+
+  function viewAs(membershipId: string | null, name = "") {
+    if (membershipId) {
+      sessionStorage.setItem(ACT_AS_KEY, membershipId);
+    } else {
+      sessionStorage.removeItem(ACT_AS_KEY);
+    }
+    setActAs(membershipId);
+    setSimulatedName(name);
+    setTab("group");
   }
 
   async function parseError(response: Response) {
@@ -260,9 +372,12 @@ function App() {
     setGroup((current) => {
       if (!current) return current;
       if (data.status === "finished") {
+        // The day stops being the one being organised, but it is still the one
+        // being celebrated and voted on, so it moves across rather than away.
         return {
           ...current,
           game_day: null,
+          finished_game_day: data,
           history: [
             {
               id: data.id,
@@ -430,9 +545,18 @@ function App() {
   async function refreshData() {
     if (!session) return;
     const bootResponse = await apiFetch("/bootstrap");
-    if (!bootResponse.ok) throw new Error(await parseError(bootResponse));
+    if (!bootResponse.ok) {
+      // A simulation the server refuses must never lock us out of our own
+      // account, so drop it and let the retry run as the real user.
+      if (actAs) {
+        sessionStorage.removeItem(ACT_AS_KEY);
+        setActAs(null);
+      }
+      throw new Error(await parseError(bootResponse));
+    }
     const boot = await bootResponse.json();
     setIsDeveloper(Boolean(boot.is_developer));
+    if (boot.is_simulated) setSimulatedName(boot.display_name ?? "");
     const mine: MyGroup[] = boot.groups ?? [];
     setMyGroups(mine);
     if (inviteCode) await loadInvite(inviteCode);
@@ -529,7 +653,9 @@ function App() {
     refreshData().catch((err) =>
       setError(err instanceof Error ? err.message : "Failed to load app")
     );
-  }, [session]);
+    // Switching the simulated identity reloads everything, which is why no
+    // other component needs to know the simulation exists.
+  }, [session, actAs]);
 
   useEffect(() => {
     if (!session || !selectedGroupId) return;
@@ -864,7 +990,27 @@ function App() {
   }
 
   const gameDay = group?.game_day ?? null;
+  const finishedGameDay = group?.finished_game_day ?? null;
   const teamNames = gameDay?.teams.map((team) => team.name) ?? [];
+  const isLive = gameDay?.status === "live";
+  const dayStatsRows =
+    dayStats.length === 0 ? (
+      <p className="muted-text">{t("noDayStats")}</p>
+    ) : (
+      <div className="stats-table">
+        {dayStats.map((row) => (
+          <div className="member-row" key={row.member.id}>
+            <div>
+              <strong>{row.member.name}</strong>
+              <div className="member-details">
+                {t("matchesPlayedLong")} {row.played} · {t("goals")} {row.goals} ·{" "}
+                {t("assists")} {row.assists}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
 
   return (
     <div className="app">
@@ -952,10 +1098,43 @@ function App() {
             >
               {t("startLive")}
             </button>
+            <label className="view-as">
+              {t("viewAs")}
+              <select
+                value={actAs ?? ""}
+                onChange={(event) => {
+                  const picked = event.target.value;
+                  const member = group?.members.find(
+                    (item) => item.id === picked
+                  );
+                  viewAs(picked || null, member?.name ?? "");
+                }}
+              >
+                <option value="">{t("myself")}</option>
+                {(group?.members ?? [])
+                  .filter((member) => !member.is_virtual)
+                  .map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <p className="muted-text">{t("simulationNote")}</p>
           </aside>
         )}
 
         <main className="container">
+          {actAs && (
+            <div className="simulation-banner">
+              <span>
+                {t("simulating")} <strong>{simulatedName || "…"}</strong>
+              </span>
+              <button className="secondary-button" onClick={() => viewAs(null)}>
+                {t("stopSimulating")}
+              </button>
+            </div>
+          )}
           {error && <div className="error-box">{error}</div>}
 
           {invitePreview && invitePreview.state !== "member" && (
@@ -1148,7 +1327,32 @@ function App() {
 
           {group && isMember && tab === "stats" && (
             <section className="card">
-              <h2>{t("statistics")}</h2>
+              <div className="section-header">
+                <h2>{t("statistics")}</h2>
+                <div className="header-actions">
+                  <button
+                    className={
+                      statsScope === "day" ? "primary-button" : "secondary-button"
+                    }
+                    onClick={() => setStatsScope("day")}
+                  >
+                    {t("dayStatistics")}
+                  </button>
+                  <button
+                    className={
+                      statsScope === "overall"
+                        ? "primary-button"
+                        : "secondary-button"
+                    }
+                    onClick={() => setStatsScope("overall")}
+                  >
+                    {t("overallStatistics")}
+                  </button>
+                </div>
+              </div>
+              {statsScope === "day" ? (
+                dayStatsRows
+              ) : (
               <div className="stats-table">
                 {stats.map((row) => (
                   <div className="member-row" key={row.id}>
@@ -1166,6 +1370,7 @@ function App() {
                   </div>
                 ))}
               </div>
+              )}
             </section>
           )}
 
@@ -1281,16 +1486,24 @@ function App() {
                         ? ` · ${gameDay.leftover_players} ${t("leftoverPlayers")}`
                         : ""}
                     </p>
-                    <div className="countdown">{countdownText(gameDay)}</div>
-                    <div className="game-stats">
-                      <span>
-                        <strong>{gameDay.participants.length}</strong>/
-                        {gameDay.participant_count} {t("registered")}
-                      </span>
-                      <span>
-                        <strong>{gameDay.waiting_list.length}</strong> {t("waiting")}
-                      </span>
-                    </div>
+                    {/* Once the day starts, the countdown and the sign-up
+                        tallies are answering a question nobody is asking any
+                        more. The registrations themselves are untouched. */}
+                    {gameDay.status === "upcoming" && (
+                      <>
+                        <div className="countdown">{countdownText(gameDay)}</div>
+                        <div className="game-stats">
+                          <span>
+                            <strong>{gameDay.participants.length}</strong>/
+                            {gameDay.participant_count} {t("registered")}
+                          </span>
+                          <span>
+                            <strong>{gameDay.waiting_list.length}</strong>{" "}
+                            {t("waiting")}
+                          </span>
+                        </div>
+                      </>
+                    )}
                     {isAdmin && gameDay.status !== "finished" && (
                       <div className="form-actions">
                         {gameDay.status === "live" && (
@@ -1330,6 +1543,42 @@ function App() {
                   </>
                 )}
               </section>
+
+              {isLive && (
+                <section className="card live-board">
+                  <div className="live-banner">
+                    <span className="live-dot" aria-hidden="true" />
+                    <strong>{t("liveGameDay")}</strong>
+                  </div>
+                  <div className="live-tabs">
+                    {(
+                      [
+                        ["matches", t("matches")],
+                        ["standings", t("standings")],
+                        ["stats", t("dayStatistics")],
+                        ["teams", t("teams")],
+                      ] as const
+                    ).map(([key, caption]) => (
+                      <button
+                        key={key}
+                        className={
+                          liveTab === key ? "primary-button" : "secondary-button"
+                        }
+                        onClick={() => setLiveTab(key)}
+                      >
+                        {caption}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {isLive && liveTab === "stats" && (
+                <section className="card">
+                  <h2>{t("dayStatistics")}</h2>
+                  {dayStatsRows}
+                </section>
+              )}
 
               <section className="card">
                 <div className="section-header">
@@ -1440,7 +1689,7 @@ function App() {
                         </div>
                         <div className="member-actions">
                           {gameDay &&
-                            gameDay.status !== "finished" &&
+                            gameDay.status === "upcoming" &&
                             canControl &&
                             (participant || waiting ? (
                               <button
@@ -1531,7 +1780,7 @@ function App() {
                 </div>
               </section>
 
-              {gameDay && (
+              {gameDay && gameDay.status === "upcoming" && (
                 <section className="card">
                   <h2>{t("gameRegistration")}</h2>
                   <div className="registration-columns">
@@ -1555,7 +1804,7 @@ function App() {
                 </section>
               )}
 
-              {gameDay && (
+              {gameDay && (!isLive || liveTab === "teams") && (
                 <section className="card">
                   <h2>{t("generateTeams")}</h2>
                   {isAdmin && (
@@ -1693,7 +1942,7 @@ function App() {
                 </section>
               )}
 
-              {gameDay && gameDay.status === "live" && (
+              {isLive && liveTab === "matches" && gameDay && (
                 <section className="card">
                   <h2>{t("matches")}</h2>
                   {isAdmin && teamNames.length >= 2 && (
@@ -1805,60 +2054,123 @@ function App() {
                                   />
                                 </label>
                               </div>
-                              {goals.map((goal, index) => (
-                                <div className="form-row" key={index}>
-                                  <label>
-                                    {t("scorer")}
-                                    <select
-                                      value={goal.scorer}
-                                      onChange={(event) =>
-                                        setGoalDrafts((previous) => {
-                                          const next = [...(previous[match.id] ?? [])];
-                                          next[index] = {
-                                            ...goal,
-                                            scorer: event.target.value,
-                                          };
-                                          return { ...previous, [match.id]: next };
-                                        })
-                                      }
-                                    >
-                                      <option value="">—</option>
-                                      {match.players
-                                        .filter((player) => !player.is_virtual)
-                                        .map((player) => (
+                              {goals.map((goal, index) => {
+                                const scorer =
+                                  match.players.find(
+                                    (player) => player.id === goal.scorer
+                                  ) ?? null;
+                                // An assist can only come from a team-mate in
+                                // the same match, which is also the only thing
+                                // the server will accept.
+                                const assistOptions = scorer
+                                  ? match.players.filter(
+                                      (player) =>
+                                        player.team_name === scorer.team_name &&
+                                        player.id !== scorer.id
+                                    )
+                                  : [];
+                                return (
+                                  <div className="form-row goal-row" key={index}>
+                                    <label>
+                                      {t("scorer")}
+                                      <select
+                                        value={goal.scorer}
+                                        onChange={(event) =>
+                                          setGoalDrafts((previous) => {
+                                            const next = [
+                                              ...(previous[match.id] ?? []),
+                                            ];
+                                            const picked = event.target.value;
+                                            const stillOnSameTeam =
+                                              match.players.find(
+                                                (player) =>
+                                                  player.id === goal.assist
+                                              )?.team_name ===
+                                              match.players.find(
+                                                (player) => player.id === picked
+                                              )?.team_name;
+                                            next[index] = {
+                                              scorer: picked,
+                                              assist: stillOnSameTeam
+                                                ? goal.assist
+                                                : "",
+                                            };
+                                            return {
+                                              ...previous,
+                                              [match.id]: next,
+                                            };
+                                          })
+                                        }
+                                      >
+                                        <option value="">—</option>
+                                        {[
+                                          match.home_team_name,
+                                          match.away_team_name,
+                                        ].map((teamName) => (
+                                          <optgroup key={teamName} label={teamName}>
+                                            {match.players
+                                              .filter(
+                                                (player) =>
+                                                  player.team_name === teamName
+                                              )
+                                              .map((player) => (
+                                                <option
+                                                  key={player.id}
+                                                  value={player.id}
+                                                >
+                                                  {player.name}
+                                                </option>
+                                              ))}
+                                          </optgroup>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <label>
+                                      {t("assist")}
+                                      <select
+                                        value={goal.assist}
+                                        disabled={!scorer}
+                                        onChange={(event) =>
+                                          setGoalDrafts((previous) => {
+                                            const next = [
+                                              ...(previous[match.id] ?? []),
+                                            ];
+                                            next[index] = {
+                                              ...goal,
+                                              assist: event.target.value,
+                                            };
+                                            return {
+                                              ...previous,
+                                              [match.id]: next,
+                                            };
+                                          })
+                                        }
+                                      >
+                                        <option value="">{t("noAssist")}</option>
+                                        {assistOptions.map((player) => (
                                           <option key={player.id} value={player.id}>
                                             {player.name}
                                           </option>
                                         ))}
-                                    </select>
-                                  </label>
-                                  <label>
-                                    {t("assist")}
-                                    <select
-                                      value={goal.assist}
-                                      onChange={(event) =>
-                                        setGoalDrafts((previous) => {
-                                          const next = [...(previous[match.id] ?? [])];
-                                          next[index] = {
-                                            ...goal,
-                                            assist: event.target.value,
-                                          };
-                                          return { ...previous, [match.id]: next };
-                                        })
+                                      </select>
+                                    </label>
+                                    <button
+                                      className="text-danger-button"
+                                      type="button"
+                                      onClick={() =>
+                                        setGoalDrafts((previous) => ({
+                                          ...previous,
+                                          [match.id]: (
+                                            previous[match.id] ?? []
+                                          ).filter((_, at) => at !== index),
+                                        }))
                                       }
                                     >
-                                      <option value="">{t("noAssist")}</option>
-                                      {match.players
-                                        .filter((player) => !player.is_virtual)
-                                        .map((player) => (
-                                          <option key={player.id} value={player.id}>
-                                            {player.name}
-                                          </option>
-                                        ))}
-                                    </select>
-                                  </label>
-                                </div>
-                              ))}
+                                      {t("removeGoal")}
+                                    </button>
+                                  </div>
+                                );
+                              })}
                               <div className="form-actions">
                                 <button
                                   className="secondary-button"
@@ -1919,7 +2231,10 @@ function App() {
                 </section>
               )}
 
-              {gameDay && !gameDay.is_rotating && gameDay.standings.length > 0 && (
+              {gameDay &&
+                !gameDay.is_rotating &&
+                gameDay.standings.length > 0 &&
+                (!isLive || liveTab === "standings") && (
                 <section className="card">
                   <h2>{t("standings")}</h2>
                   {gameDay.standings.map((row) => (
@@ -1933,29 +2248,60 @@ function App() {
                 </section>
               )}
 
-              {gameDay && gameDay.status === "finished" && (
-                <section className="card">
-                  {!gameDay.is_rotating && gameDay.champion_team_name && (
-                    <h2>
-                      {gameDay.awards.champions.length > 1
-                        ? t("coChampions")
-                        : t("champion")}
-                      : {gameDay.champion_team_name}
-                    </h2>
+              {finishedGameDay && (
+                <section className="card celebration-card">
+                  {!finishedGameDay.is_rotating &&
+                    finishedGameDay.champion_team_name && (
+                      <>
+                        <div className="trophy" aria-hidden="true">
+                          🏆
+                        </div>
+                        <h2>
+                          {finishedGameDay.awards.champions.length > 1
+                            ? t("coChampions")
+                            : t("champion")}
+                          : {finishedGameDay.champion_team_name}
+                        </h2>
+                        {finishedGameDay.awards.champions.length > 0 && (
+                          <p className="champion-squad">
+                            {finishedGameDay.awards.champions
+                              .map((item) => item.name)
+                              .join(" · ")}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  {finishedGameDay.standings.length > 0 && (
+                    <div className="standings-list">
+                      {finishedGameDay.standings.map((row) => (
+                        <p key={row.name}>
+                          {row.name}: {row.points} {t("pts")} · {row.wins}
+                          {t("wins")} {row.draws}
+                          {t("draws")} {row.losses}
+                          {t("losses")} · {t("gd")} {row.goal_difference}
+                        </p>
+                      ))}
+                    </div>
                   )}
-                  {gameDay.mvp_announced ? (
+                  {finishedGameDay.mvp_announced ? (
                     <p>
-                      {gameDay.awards.mvps.length > 1 ? t("coMvps") : t("mvpAnnounced")}
-                      : {gameDay.awards.mvps.map((item) => item.name).join(", ")}
+                      {finishedGameDay.awards.mvps.length > 1
+                        ? t("coMvps")
+                        : t("mvpAnnounced")}
+                      :{" "}
+                      {finishedGameDay.awards.mvps
+                        .map((item) => item.name)
+                        .join(", ")}
                     </p>
                   ) : (
                     <>
                       <h2>{t("mvpVoting")}</h2>
                       <p className="muted-text">{t("waitingForVotes")}</p>
                       <p className="muted-text">
-                        {gameDay.votes_cast}/{gameDay.eligible_voters}
+                        {finishedGameDay.votes_cast}/
+                        {finishedGameDay.eligible_voters}
                       </p>
-                      {gameDay.my_vote && <p>{t("youVoted")}</p>}
+                      {finishedGameDay.my_vote && <p>{t("youVoted")}</p>}
                       {currentMembership && !currentMembership.is_virtual && (
                         <div className="form-actions">
                           <select
@@ -1963,7 +2309,7 @@ function App() {
                             onChange={(event) => setMvpChoice(event.target.value)}
                           >
                             <option value="">—</option>
-                            {gameDay.participants
+                            {finishedGameDay.participants
                               .filter(
                                 (player) =>
                                   !player.is_virtual &&
@@ -1981,7 +2327,7 @@ function App() {
                             onClick={() =>
                               runAction(() =>
                                 apiFetch(
-                                  `/groups/${group.id}/game-days/${gameDay.id}/mvp`,
+                                  `/groups/${group.id}/game-days/${finishedGameDay.id}/mvp`,
                                   {
                                     method: "POST",
                                     headers: {
@@ -2005,7 +2351,7 @@ function App() {
                           onClick={() =>
                             runAction(() =>
                               apiFetch(
-                                `/groups/${group.id}/game-days/${gameDay.id}/mvp/close`,
+                                `/groups/${group.id}/game-days/${finishedGameDay.id}/mvp/close`,
                                 { method: "POST" }
                               )
                             )
@@ -2024,33 +2370,31 @@ function App() {
                 {group.survey?.status === "open" ? (
                   <>
                     <p>{t("surveyOpen")}</p>
-                    {group.members
-                      .filter(
-                        (member) =>
-                          !member.is_virtual &&
-                          member.id !== currentMembership?.id
-                      )
-                      .map((member) => (
-                        <label key={member.id}>
-                          {member.name}
-                          <select
-                            value={surveyDraft[member.id] ?? ""}
-                            onChange={(event) =>
-                              setSurveyDraft((previous) => ({
-                                ...previous,
-                                [member.id]: Number(event.target.value),
-                              }))
-                            }
-                          >
-                            <option value="">—</option>
-                            {[1, 2, 3, 4, 5].map((value) => (
-                              <option key={value} value={value}>
-                                {value}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ))}
+                    <div className="survey-list">
+                      {group.members
+                        .filter((member) => member.id !== currentMembership?.id)
+                        .map((member) => (
+                          <div className="survey-row" key={member.id}>
+                            <span className="survey-name">{member.name}</span>
+                            <StarRating
+                              label={member.name}
+                              // Fall back to what was already submitted, so
+                              // reopening the survey is an edit, not a reset.
+                              value={
+                                surveyDraft[member.id] ??
+                                group.survey?.my_ratings?.[member.id] ??
+                                0
+                              }
+                              onChange={(value) =>
+                                setSurveyDraft((previous) => ({
+                                  ...previous,
+                                  [member.id]: value,
+                                }))
+                              }
+                            />
+                          </div>
+                        ))}
+                    </div>
                     <div className="form-actions">
                       <button
                         className="primary-button"

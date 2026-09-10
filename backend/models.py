@@ -10,7 +10,6 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Numeric,
-    SmallInteger,
     Text,
     UniqueConstraint,
     text,
@@ -351,7 +350,7 @@ class RatingSurveyResponse(Base):
         ForeignKey("memberships.id", ondelete="CASCADE"),
         nullable=False,
     )
-    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    rating: Mapped[Decimal] = mapped_column(Numeric(2, 1), nullable=False)
     created_at: Mapped[datetime] = created_at_col()
 
     survey: Mapped["RatingSurvey"] = relationship(back_populates="responses")
