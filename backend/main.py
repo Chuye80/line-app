@@ -92,6 +92,10 @@ class UpdateMemberRequest(BaseModel):
     is_admin: bool = False
 
 
+class TransferAdminAndLeaveRequest(BaseModel):
+    target_membership_id: UUID
+
+
 class JoinWithInviteRequest(BaseModel):
     invite_code: str = Field(min_length=1)
 
@@ -1397,6 +1401,69 @@ def leave_group(
     return {"message": "Left group successfully"}
 
 
+@app.post("/groups/{group_id}/transfer-admin-and-leave")
+def transfer_admin_and_leave(
+    group_id: UUID,
+    request: TransferAdminAndLeaveRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    membership = require_admin(db, group, user)
+    target = db.get(Membership, request.target_membership_id)
+    if target is None or target.group_id != group.id:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if target.id == membership.id:
+        raise HTTPException(
+            status_code=400,
+            detail="Choose another real member to receive the admin role",
+        )
+    if not is_real(target):
+        raise HTTPException(
+            status_code=400,
+            detail="Virtual members cannot be admins",
+        )
+
+    # Promotion and departure share one transaction. A failed delete can never
+    # leave the group with a surprising partial role change.
+    target.is_admin = True
+    game_day = current_game_day(db, group)
+    if game_day:
+        registration = (
+            db.query(Registration)
+            .filter(
+                Registration.game_day_id == game_day.id,
+                Registration.membership_id == membership.id,
+            )
+            .first()
+        )
+        if registration:
+            db.delete(registration)
+        clear_teams(db, game_day)
+    db.delete(membership)
+    db.commit()
+    if game_day:
+        promote_waiting_players(db, game_day)
+    return {"message": "Admin role transferred and group left successfully"}
+
+
+@app.delete("/groups/{group_id}")
+def delete_group(
+    group_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_admin(db, group, user)
+
+    # The live schema's complete group-owned FK graph is ON DELETE CASCADE.
+    # Execute one database-level delete so join requests, game days, matches,
+    # goals, MVP data and surveys are handled by those constraints atomically.
+    db.execute(text("DELETE FROM groups WHERE id = :group_id"), {"group_id": group.id})
+    db.commit()
+    return {"message": "Group permanently deleted"}
+
+
 @app.post("/groups/{group_id}/members")
 def add_virtual_member(
     group_id: UUID,
@@ -1433,6 +1500,11 @@ def update_member(
     membership = db.get(Membership, membership_id)
     if membership is None or membership.group_id != group.id:
         raise HTTPException(status_code=404, detail="Member not found")
+    if not is_real(membership) and request.is_admin:
+        raise HTTPException(
+            status_code=400,
+            detail="Virtual members cannot be admins",
+        )
     if membership.is_admin and is_real(membership) and not request.is_admin:
         ensure_not_last_admin(db, membership)
     if membership.user_id is None:
@@ -1999,13 +2071,30 @@ def submit_survey_ratings(
         raise HTTPException(status_code=404, detail="Survey not found")
     if survey.status != "open":
         raise HTTPException(status_code=400, detail="This survey is closed")
-    # Everyone in the group can be rated except the rater. Virtual players are
-    # included because their rating is what balances the teams they play in.
-    ratable_ids = {item.id for item in group.memberships if item.id != membership.id}
     for key, value in request.ratings.items():
-        rated_id = UUID(key)
-        if rated_id not in ratable_ids:
-            continue
+        try:
+            rated_id = UUID(key)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Each rating target must be a valid membership id",
+            ) from exc
+        if rated_id == membership.id:
+            raise HTTPException(
+                status_code=400,
+                detail="You cannot rate yourself",
+            )
+        rated = db.get(Membership, rated_id)
+        if rated is None or rated.group_id != group.id:
+            raise HTTPException(
+                status_code=400,
+                detail="Only current members of this group can be rated",
+            )
+        if not is_real(rated):
+            raise HTTPException(
+                status_code=400,
+                detail="Virtual members cannot be rated",
+            )
         if value < 1 or value > 5:
             raise HTTPException(status_code=400, detail="Ratings must be between 1 and 5")
         # Half stars only: doubling a permitted value lands on a whole number.
@@ -2058,7 +2147,7 @@ def close_survey(
         totals[response.rated_membership_id].append(response.rating)
     for membership_id, values in totals.items():
         membership = db.get(Membership, membership_id)
-        if membership is None:
+        if membership is None or not is_real(membership):
             continue
         average = sum(values) / len(values)
         rounded = Decimal(str(average)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)

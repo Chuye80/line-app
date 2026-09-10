@@ -832,6 +832,11 @@ button:disabled {
   right: 0;
 }
 
+.star-hit.whole {
+  left: 0;
+  width: 100%;
+}
+
 .star-glyph {
   position: absolute;
   inset: 0;
@@ -862,4 +867,21 @@ button:disabled {
   margin-inline-start: 8px;
   font-variant-numeric: tabular-nums;
   color: #5c6270;
+}
+
+.exit-options {
+  border-color: #f0b7b3;
+}
+
+.exit-options .form-panel {
+  margin: 12px 0;
+}
+
+.empty-state {
+  margin: 12px 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f5f6f8;
+  color: #5c6270;
+  text-align: center;
 }

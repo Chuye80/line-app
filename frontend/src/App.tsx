@@ -157,20 +157,32 @@ function StarRating({
         const fill = value >= star ? "full" : value >= half ? "half" : "empty";
         return (
           <span className="star" key={star}>
-            <button
-              type="button"
-              className="star-hit left"
-              aria-label={`${label}: ${half.toFixed(1)}`}
-              aria-pressed={value === half}
-              onClick={() => onChange(half)}
-            />
-            <button
-              type="button"
-              className="star-hit right"
-              aria-label={`${label}: ${star.toFixed(1)}`}
-              aria-pressed={value === star}
-              onClick={() => onChange(star)}
-            />
+            {star === 1 ? (
+              <button
+                type="button"
+                className="star-hit whole"
+                aria-label={`${label}: 1.0`}
+                aria-pressed={value === 1}
+                onClick={() => onChange(1)}
+              />
+            ) : (
+              <button
+                type="button"
+                className="star-hit left"
+                aria-label={`${label}: ${half.toFixed(1)}`}
+                aria-pressed={value === half}
+                onClick={() => onChange(half)}
+              />
+            )}
+            {star !== 1 && (
+              <button
+                type="button"
+                className="star-hit right"
+                aria-label={`${label}: ${star.toFixed(1)}`}
+                aria-pressed={value === star}
+                onClick={() => onChange(star)}
+              />
+            )}
             <span className={`star-glyph ${fill}`} aria-hidden="true">
               ★
             </span>
@@ -260,6 +272,8 @@ function App() {
   const [mvpChoice, setMvpChoice] = useState("");
   const [surveyDraft, setSurveyDraft] = useState<Record<string, number>>({});
   const [copied, setCopied] = useState(false);
+  const [showExitOptions, setShowExitOptions] = useState(false);
+  const [transferTarget, setTransferTarget] = useState("");
   const membershipStateRef = useRef<string | null>(null);
   const skipNextGroupLoad = useRef(false);
   const isAdminRef = useRef(false);
@@ -280,6 +294,18 @@ function App() {
       null,
     [group, membership?.membership_id]
   );
+  const otherRealMembers =
+    group?.members.filter(
+      (member) =>
+        !member.is_virtual && member.id !== currentMembership?.id
+    ) ?? [];
+  const otherRealAdmins = otherRealMembers.filter((member) => member.is_admin);
+  const isSoleRealAdmin = Boolean(isAdmin && otherRealAdmins.length === 0);
+  const surveyEligibleMembers =
+    group?.members.filter(
+      (member) =>
+        !member.is_virtual && member.id !== currentMembership?.id
+    ) ?? [];
 
   // Statistics for the single day being played or just finished. These are
   // read straight off that day's matches rather than kept alongside the
@@ -879,6 +905,48 @@ function App() {
     resetMemberForm();
   }
 
+  async function leaveGroup() {
+    if (!group) return;
+    await runAction(
+      () =>
+        apiFetch(`/groups/${group.id}/leave`, {
+          method: "DELETE",
+        }),
+      "reload-app"
+    );
+    setShowExitOptions(false);
+    setSelectedGroupId(null);
+  }
+
+  async function transferAdminAndLeave() {
+    if (!group || !transferTarget) return;
+    await runAction(
+      () =>
+        apiFetch(`/groups/${group.id}/transfer-admin-and-leave`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target_membership_id: transferTarget }),
+        }),
+      "reload-app"
+    );
+    setShowExitOptions(false);
+    setTransferTarget("");
+    setSelectedGroupId(null);
+  }
+
+  async function deleteGroup() {
+    if (!group || !window.confirm(t("deleteGroupConfirm"))) return;
+    await runAction(
+      () =>
+        apiFetch(`/groups/${group.id}`, {
+          method: "DELETE",
+        }),
+      "reload-app"
+    );
+    setShowExitOptions(false);
+    setSelectedGroupId(null);
+  }
+
   function countdownText(gameDay: GameDay) {
     const deadline = new Date(gameDay.regular_registration_opens);
     const diff = deadline.getTime() - now.getTime();
@@ -1223,20 +1291,65 @@ function App() {
                   <button
                     className="text-danger-button"
                     onClick={() => {
-                      if (window.confirm(t("leaveConfirm"))) {
-                        runAction(
-                          () =>
-                            apiFetch(`/groups/${group.id}/leave`, {
-                              method: "DELETE",
-                            }),
-                          "reload-app"
-                        ).then(() => setSelectedGroupId(null));
+                      if (isSoleRealAdmin) {
+                        setShowExitOptions(true);
+                      } else if (window.confirm(t("leaveConfirm"))) {
+                        leaveGroup();
                       }
                     }}
                   >
                     {t("leaveGroup")}
                   </button>
                 </div>
+              </div>
+            </section>
+          )}
+
+          {group && isMember && showExitOptions && isSoleRealAdmin && (
+            <section className="card exit-options" aria-live="polite">
+              <h2>{t("soleAdminExitTitle")}</h2>
+              <p>{t("soleAdminExitHelp")}</p>
+              {otherRealMembers.length > 0 && (
+                <div className="form-panel">
+                  <label>
+                    {t("transferAdminTo")}
+                    <select
+                      value={transferTarget}
+                      onChange={(event) => setTransferTarget(event.target.value)}
+                    >
+                      <option value="">—</option>
+                      {otherRealMembers.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="primary-button"
+                    disabled={!transferTarget}
+                    onClick={transferAdminAndLeave}
+                  >
+                    {t("transferAndLeave")}
+                  </button>
+                </div>
+              )}
+              {otherRealMembers.length === 0 && (
+                <p className="muted-text">{t("noRealMemberForTransfer")}</p>
+              )}
+              <div className="form-actions">
+                <button className="danger-button" onClick={deleteGroup}>
+                  {t("deleteGroup")}
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setShowExitOptions(false);
+                    setTransferTarget("");
+                  }}
+                >
+                  {t("cancel")}
+                </button>
               </div>
             </section>
           )}
@@ -1274,6 +1387,9 @@ function App() {
                   }}
                 >
                   {t("regenerateInvite")}
+                </button>
+                <button className="danger-button" onClick={deleteGroup}>
+                  {t("deleteGroup")}
                 </button>
               </div>
             </section>
@@ -2370,10 +2486,11 @@ function App() {
                 {group.survey?.status === "open" ? (
                   <>
                     <p>{t("surveyOpen")}</p>
-                    <div className="survey-list">
-                      {group.members
-                        .filter((member) => member.id !== currentMembership?.id)
-                        .map((member) => (
+                    {surveyEligibleMembers.length === 0 ? (
+                      <p className="empty-state">{t("noEligibleSurveyMembers")}</p>
+                    ) : (
+                      <div className="survey-list">
+                        {surveyEligibleMembers.map((member) => (
                           <div className="survey-row" key={member.id}>
                             <span className="survey-name">{member.name}</span>
                             <StarRating
@@ -2394,25 +2511,28 @@ function App() {
                             />
                           </div>
                         ))}
-                    </div>
+                      </div>
+                    )}
                     <div className="form-actions">
-                      <button
-                        className="primary-button"
-                        onClick={() =>
-                          runAction(() =>
-                            apiFetch(
-                              `/groups/${group.id}/surveys/${group.survey!.id}/ratings`,
-                              {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ ratings: surveyDraft }),
-                              }
+                      {surveyEligibleMembers.length > 0 && (
+                        <button
+                          className="primary-button"
+                          onClick={() =>
+                            runAction(() =>
+                              apiFetch(
+                                `/groups/${group.id}/surveys/${group.survey!.id}/ratings`,
+                                {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ ratings: surveyDraft }),
+                                }
+                              )
                             )
-                          )
-                        }
-                      >
-                        {t("submitRatings")}
-                      </button>
+                          }
+                        >
+                          {t("submitRatings")}
+                        </button>
+                      )}
                       {isAdmin && (
                         <button
                           className="secondary-button"

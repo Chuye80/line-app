@@ -25,6 +25,16 @@ export const translations: Record<Language, Record<string, string>> = {
     createGroup: "Create Group",
     leaveGroup: "Leave Group",
     leaveConfirm: "Leave this group?",
+    soleAdminExitTitle: "You are the only admin",
+    soleAdminExitHelp:
+      "Transfer the admin role to another real member before leaving, or permanently delete the group.",
+    transferAdminTo: "Transfer admin role to",
+    transferAndLeave: "Transfer and leave",
+    noRealMemberForTransfer:
+      "There are no other real members. Deleting the group is the only way to leave.",
+    deleteGroup: "Delete Group",
+    deleteGroupConfirm:
+      "Permanently delete this group and all of its Game Days, matches, registrations, MVP data and surveys? This cannot be undone.",
     joinGroup: "Join this group",
     requestToJoin: "Request to Join",
     joinPending: "Your request is waiting for admin approval.",
@@ -123,7 +133,9 @@ export const translations: Record<Language, Record<string, string>> = {
     ratingSurvey: "Rating survey",
     startSurvey: "Start rating survey",
     closeSurvey: "Close survey and update ratings",
-    surveyOpen: "A rating survey is open. Rate every other member from 1 to 5. Your ratings are private.",
+    surveyOpen:
+      "A rating survey is open. Rate every other real member from 1 to 5. Your ratings are private.",
+    noEligibleSurveyMembers: "No other real members are available to rate.",
     surveyClosed: "Last survey closed. Member ratings were updated from the averages.",
     submitRatings: "Save my ratings",
     invite: "Invite",
@@ -181,6 +193,16 @@ export const translations: Record<Language, Record<string, string>> = {
     createGroup: "יצירת קבוצה",
     leaveGroup: "עזיבת קבוצה",
     leaveConfirm: "לעזוב את הקבוצה?",
+    soleAdminExitTitle: "אתם המנהלים היחידים",
+    soleAdminExitHelp:
+      "יש להעביר את תפקיד המנהל לחבר אמיתי אחר לפני העזיבה, או למחוק את הקבוצה לצמיתות.",
+    transferAdminTo: "העברת תפקיד מנהל אל",
+    transferAndLeave: "העברה ועזיבה",
+    noRealMemberForTransfer:
+      "אין חברים אמיתיים אחרים. מחיקת הקבוצה היא הדרך היחידה לעזוב.",
+    deleteGroup: "מחיקת קבוצה",
+    deleteGroupConfirm:
+      "למחוק לצמיתות את הקבוצה ואת כל ימי המשחקים, המשחקים, ההרשמות, נתוני ה-MVP והסקרים שלה? לא ניתן לבטל פעולה זו.",
     joinGroup: "הצטרפות לקבוצה",
     requestToJoin: "בקשת הצטרפות",
     joinPending: "הבקשה ממתינה לאישור מנהל.",
@@ -281,7 +303,8 @@ export const translations: Record<Language, Record<string, string>> = {
     startSurvey: "פתיחת סקר דירוג",
     closeSurvey: "סגירת הסקר ועדכון דירוגים",
     surveyOpen:
-      "סקר דירוג פתוח. דרגו כל חבר אחר מ־1 עד 5. הדירוגים שלכם פרטיים.",
+      "סקר דירוג פתוח. דרגו כל חבר אמיתי אחר מ־1 עד 5. הדירוגים שלכם פרטיים.",
+    noEligibleSurveyMembers: "אין חברים אמיתיים אחרים שניתן לדרג.",
     surveyClosed: "הסקר האחרון נסגר. דירוגי החברים עודכנו לפי הממוצע.",
     submitRatings: "שמירת הדירוגים שלי",
     invite: "הזמנה",
