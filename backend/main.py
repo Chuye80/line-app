@@ -41,7 +41,12 @@ from backend.team_generator import generate_balanced_teams
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173").rstrip("/")
+LOCAL_FRONTEND_URL = "http://127.0.0.1:5173"
+HOSTED_FRONTEND_URL = "https://line-app-cyan.vercel.app"
+default_frontend_url = (
+    HOSTED_FRONTEND_URL if os.getenv("RAILWAY_PUBLIC_DOMAIN") else LOCAL_FRONTEND_URL
+)
+FRONTEND_URL = os.getenv("FRONTEND_URL", default_frontend_url).rstrip("/")
 ENABLE_DEV_ENDPOINTS = os.getenv("ENABLE_DEV_ENDPOINTS", "").lower() in {
     "1",
     "true",
@@ -58,7 +63,8 @@ app = FastAPI(title="LineApp API")
 
 cors_origins = [
     "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    LOCAL_FRONTEND_URL,
+    HOSTED_FRONTEND_URL,
 ]
 if FRONTEND_URL not in cors_origins:
     cors_origins.append(FRONTEND_URL)
