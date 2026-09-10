@@ -1,0 +1,19 @@
+# Test and development dependencies.
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# The suite runs against a real PostgreSQL built from supabase/migrations, so a
+# local server (or the PGHOST/PGPORT/PGUSER/PGPASSWORD pointing at one) is also
+# required. See scripts/reset_test_db.sh.
+
+-r requirements.txt
+
+pytest==9.1.1
+httpx==0.28.1
+
+# httpx / pytest transitives.
+httpcore==1.0.9
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
