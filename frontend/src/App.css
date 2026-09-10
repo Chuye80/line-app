@@ -344,6 +344,33 @@ button:disabled {
   }
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.language-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.language-toggle select {
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: white;
+}
+
+.developer-panel {
+  border-inline-end: 1px solid #e5e7eb;
+  border-right: none;
+}
+
 .header {
   display: flex;
   align-items: center;

@@ -15,9 +15,31 @@ if not DATABASE_URL:
     )
 
 
+_ENGINE_KWARGS = {
+    "pool_pre_ping": False,
+    "pool_recycle": 600,
+    "pool_reset_on_return": None,
+    "connect_args": {
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    },
+}
+
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,
+    pool_size=8,
+    max_overflow=4,
+    **_ENGINE_KWARGS,
+)
+
+read_engine = create_engine(
+    DATABASE_URL,
+    isolation_level="AUTOCOMMIT",
+    pool_size=4,
+    max_overflow=2,
+    **_ENGINE_KWARGS,
 )
 
 
