@@ -401,8 +401,10 @@ def registration_status_for(
 
 
 def clear_teams(db: Session, game_day: GameDay) -> None:
-    for assignment in list(game_day.team_assignments):
-        db.delete(assignment)
+    db.query(TeamAssignment).filter(
+        TeamAssignment.game_day_id == game_day.id
+    ).delete(synchronize_session="fetch")
+    db.flush()
 
 
 def promote_waiting_players(db: Session, game_day: GameDay) -> None:
