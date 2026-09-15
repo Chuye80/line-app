@@ -1644,6 +1644,22 @@ function App() {
                     )}
                     {isAdmin && gameDay.status !== "finished" && (
                       <div className="form-actions">
+                        {gameDay.status === "upcoming" &&
+                          gameDay.teams.length > 0 && (
+                          <button
+                            className="primary-button"
+                            onClick={() =>
+                              runAction(() =>
+                                apiFetch(
+                                  `/groups/${group.id}/game-days/${gameDay.id}/start`,
+                                  { method: "POST" }
+                                )
+                              )
+                            }
+                          >
+                            {t("startGameDay")}
+                          </button>
+                        )}
                         {gameDay.status === "live" && (
                           <button
                             className="primary-button"

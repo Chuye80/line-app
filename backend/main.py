@@ -1877,6 +1877,25 @@ def complete_match(
     return serialize_game_day(db, game_day, caller)
 
 
+@app.post("/groups/{group_id}/game-days/{game_day_id}/start")
+def start_game_day(
+    group_id: UUID,
+    game_day_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_admin(db, group, user)
+    game_day = db.get(GameDay, game_day_id)
+    if game_day is None or game_day.group_id != group.id:
+        raise HTTPException(status_code=404, detail="Game Day not found")
+    game_day.game_datetime = now_utc() - timedelta(seconds=1)
+    game_day.status = "live"
+    db.commit()
+    caller = membership_for_user(db, group.id, user.id)
+    return slim_game_day_dict(db, game_day, caller)
+
+
 @app.post("/groups/{group_id}/game-days/{game_day_id}/finish")
 def finish_game_day(
     group_id: UUID,
