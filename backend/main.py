@@ -47,6 +47,20 @@ default_frontend_url = (
     HOSTED_FRONTEND_URL if os.getenv("RAILWAY_PUBLIC_DOMAIN") else LOCAL_FRONTEND_URL
 )
 FRONTEND_URL = os.getenv("FRONTEND_URL", default_frontend_url).rstrip("/")
+
+
+def invite_origin() -> str:
+    hosted = bool(
+        os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    )
+    loopback = FRONTEND_URL.startswith(
+        ("http://127.0.0.1", "http://localhost")
+    )
+    if hosted and loopback:
+        return HOSTED_FRONTEND_URL
+    return FRONTEND_URL
+
+
 ENABLE_DEV_ENDPOINTS = os.getenv("ENABLE_DEV_ENDPOINTS", "").lower() in {
     "1",
     "true",
@@ -1038,7 +1052,7 @@ def group_to_dict(
     }
     if include_invite:
         result["invite_code"] = group.invite_code
-        result["invite_link"] = f"{FRONTEND_URL}/?invite={group.invite_code}"
+        result["invite_link"] = f"{invite_origin()}/?invite={group.invite_code}"
     return result
 
 
@@ -1301,7 +1315,7 @@ def regenerate_invite(
     db.commit()
     return {
         "invite_code": group.invite_code,
-        "invite_link": f"{FRONTEND_URL}/?invite={group.invite_code}",
+        "invite_link": f"{invite_origin()}/?invite={group.invite_code}",
     }
 
 
