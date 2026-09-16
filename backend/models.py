@@ -85,6 +85,11 @@ class Membership(Base):
         nullable=False,
     )
     user_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    game_day_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("game_days.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     rating: Mapped[Decimal] = mapped_column(Numeric(3, 1), nullable=False, default=Decimal("3.0"))
     is_subscriber: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

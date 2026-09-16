@@ -122,6 +122,11 @@ class UpdateMemberRequest(BaseModel):
     is_admin: bool = False
 
 
+class GuestRequest(BaseModel):
+    name: str = Field(min_length=1)
+    rating: float = Field(ge=1, le=5)
+
+
 class TransferAdminAndLeaveRequest(BaseModel):
     target_membership_id: UUID
 
@@ -497,6 +502,7 @@ def membership_to_dict(
     membership: Membership,
     cache: dict[UUID, str] | None = None,
 ) -> dict:
+    is_guest = membership.game_day_id is not None
     return {
         "id": str(membership.id),
         "user_id": str(membership.user_id) if membership.user_id else None,
@@ -504,7 +510,8 @@ def membership_to_dict(
         "rating": float(membership.rating),
         "is_subscriber": bool(membership.is_subscriber),
         "is_admin": membership.is_admin,
-        "is_virtual": membership.user_id is None,
+        "is_virtual": membership.user_id is None and not is_guest,
+        "is_guest": is_guest,
     }
 
 
@@ -734,6 +741,9 @@ def read_group_payload(group_id: UUID, user_id: UUID) -> dict:
             status_code=403,
             detail="You are not a member of this group",
         )
+    payload["members"] = [
+        member for member in payload.get("members", []) if not member.get("is_guest")
+    ]
     attach_standings(payload.get("game_day"))
     # The finished day carries the final table, so it needs standings too.
     attach_standings(payload.get("finished_game_day"))
@@ -1029,7 +1039,11 @@ def group_to_dict(
         "name": group.name,
         "last_participant_count": group.last_participant_count,
         "last_players_per_team": group.last_players_per_team,
-        "members": [membership_to_dict(db, item, names) for item in group.memberships],
+        "members": [
+            membership_to_dict(db, item, names)
+            for item in group.memberships
+            if item.game_day_id is None
+        ],
         "game_day": (
             None
             if current is None
@@ -1533,7 +1547,11 @@ def update_member(
     group = get_group_or_404(db, group_id)
     require_admin(db, group, user)
     membership = db.get(Membership, membership_id)
-    if membership is None or membership.group_id != group.id:
+    if (
+        membership is None
+        or membership.group_id != group.id
+        or membership.game_day_id is not None
+    ):
         raise HTTPException(status_code=404, detail="Member not found")
     if not is_real(membership) and request.is_admin:
         raise HTTPException(
@@ -1566,7 +1584,11 @@ def delete_member(
     group = get_group_or_404(db, group_id)
     require_admin(db, group, user)
     membership = db.get(Membership, membership_id)
-    if membership is None or membership.group_id != group.id:
+    if (
+        membership is None
+        or membership.group_id != group.id
+        or membership.game_day_id is not None
+    ):
         raise HTTPException(status_code=404, detail="Member not found")
     ensure_not_last_admin(db, membership)
     game_day = current_game_day(db, group)
@@ -1671,7 +1693,11 @@ def register_member(
     if game_day.status == "finished":
         raise HTTPException(status_code=400, detail="This Game Day is finished")
     target = db.get(Membership, membership_id)
-    if target is None or target.group_id != group.id:
+    if (
+        target is None
+        or target.group_id != group.id
+        or target.game_day_id is not None
+    ):
         raise HTTPException(status_code=404, detail="Member not found")
     if target.id != caller.id and not caller.is_admin:
         raise HTTPException(status_code=403, detail="Admin permission required")
@@ -1720,6 +1746,119 @@ def unregister_member(
         clear_teams(db, game_day)
         db.commit()
         promote_waiting_players(db, game_day)
+    return slim_game_day_dict(db, game_day, caller)
+
+
+def validate_guest_rating(rating: float) -> None:
+    if rating * 2 != round(rating * 2):
+        raise HTTPException(
+            status_code=400,
+            detail="Guest ratings must be given in steps of 0.5",
+        )
+
+
+def guest_name(name: str) -> str:
+    value = name.strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="Guest name is required")
+    return value
+
+
+@app.post("/groups/{group_id}/game-days/{game_day_id}/guests")
+def create_guest(
+    group_id: UUID,
+    game_day_id: UUID,
+    request: GuestRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_admin(db, group, user)
+    game_day = db.get(GameDay, game_day_id)
+    if game_day is None or game_day.group_id != group.id:
+        raise HTTPException(status_code=404, detail="Game Day not found")
+    game_day = sync_game_day_status(db, game_day)
+    if game_day.status != "upcoming":
+        raise HTTPException(status_code=400, detail="Guests can only be added before kickoff")
+    if participant_count_db(db, game_day.id) >= game_day.participant_count:
+        raise HTTPException(status_code=400, detail="This Game Day is full")
+    validate_guest_rating(request.rating)
+    guest = Membership(
+        group_id=group.id,
+        game_day_id=game_day.id,
+        display_name=guest_name(request.name),
+        rating=Decimal(str(request.rating)),
+        is_subscriber=False,
+        is_admin=False,
+    )
+    db.add(guest)
+    db.flush()
+    db.add(
+        Registration(
+            game_day_id=game_day.id,
+            membership_id=guest.id,
+            status="participant",
+        )
+    )
+    clear_teams(db, game_day)
+    db.commit()
+    caller = membership_for_user(db, group.id, user.id)
+    return slim_game_day_dict(db, game_day, caller)
+
+
+@app.put("/groups/{group_id}/game-days/{game_day_id}/guests/{guest_id}")
+def update_guest(
+    group_id: UUID,
+    game_day_id: UUID,
+    guest_id: UUID,
+    request: GuestRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_admin(db, group, user)
+    game_day = db.get(GameDay, game_day_id)
+    guest = db.get(Membership, guest_id)
+    if game_day is None or game_day.group_id != group.id:
+        raise HTTPException(status_code=404, detail="Game Day not found")
+    game_day = sync_game_day_status(db, game_day)
+    if game_day.status != "upcoming":
+        raise HTTPException(status_code=400, detail="Guests can only be edited before kickoff")
+    if guest is None or guest.game_day_id != game_day.id:
+        raise HTTPException(status_code=404, detail="Guest not found")
+    validate_guest_rating(request.rating)
+    guest.display_name = guest_name(request.name)
+    guest.rating = Decimal(str(request.rating))
+    clear_teams(db, game_day)
+    db.commit()
+    caller = membership_for_user(db, group.id, user.id)
+    return slim_game_day_dict(db, game_day, caller)
+
+
+@app.delete("/groups/{group_id}/game-days/{game_day_id}/guests/{guest_id}")
+def delete_guest(
+    group_id: UUID,
+    game_day_id: UUID,
+    guest_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_admin(db, group, user)
+    game_day = db.get(GameDay, game_day_id)
+    guest = db.get(Membership, guest_id)
+    if game_day is None or game_day.group_id != group.id:
+        raise HTTPException(status_code=404, detail="Game Day not found")
+    game_day = sync_game_day_status(db, game_day)
+    if game_day.status != "upcoming":
+        raise HTTPException(status_code=400, detail="Guests can only be removed before kickoff")
+    if guest is None or guest.game_day_id != game_day.id:
+        raise HTTPException(status_code=404, detail="Guest not found")
+    db.delete(guest)
+    clear_teams(db, game_day)
+    db.commit()
+    promote_waiting_players(db, game_day)
+    caller = membership_for_user(db, group.id, user.id)
     return slim_game_day_dict(db, game_day, caller)
 
 

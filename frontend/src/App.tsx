@@ -20,6 +20,7 @@ type Member = {
   is_subscriber: boolean;
   is_admin: boolean;
   is_virtual: boolean;
+  is_guest: boolean;
   team_name?: string;
 };
 
@@ -258,6 +259,10 @@ function App() {
   const [memberRating, setMemberRating] = useState(3);
   const [memberSubscriber, setMemberSubscriber] = useState(false);
   const [memberAdmin, setMemberAdmin] = useState(false);
+  const [showGuestForm, setShowGuestForm] = useState(false);
+  const [editingGuest, setEditingGuest] = useState<Member | null>(null);
+  const [guestName, setGuestName] = useState("");
+  const [guestRating, setGuestRating] = useState(3);
   const [teamDraft, setTeamDraft] = useState<Record<string, string>>({});
   const [editingTeams, setEditingTeams] = useState(false);
 
@@ -927,6 +932,54 @@ function App() {
     resetMemberForm();
   }
 
+  function resetGuestForm() {
+    setEditingGuest(null);
+    setGuestName("");
+    setGuestRating(3);
+    setShowGuestForm(false);
+  }
+
+  function startEditGuest(guest: Member) {
+    setEditingGuest(guest);
+    setGuestName(guest.name);
+    setGuestRating(guest.rating);
+    setShowGuestForm(true);
+  }
+
+  async function saveGuest(event: FormEvent) {
+    event.preventDefault();
+    if (!group?.game_day || !guestName.trim()) return;
+    const path = editingGuest
+      ? `/groups/${group.id}/game-days/${group.game_day.id}/guests/${editingGuest.id}`
+      : `/groups/${group.id}/game-days/${group.game_day.id}/guests`;
+    await runAction(() =>
+      apiFetch(path, {
+        method: editingGuest ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: guestName.trim(),
+          rating: guestRating,
+        }),
+      })
+    );
+    resetGuestForm();
+  }
+
+  async function removeGuest(guest: Member) {
+    if (!group?.game_day || !window.confirm(t("removeGuestConfirm"))) return;
+    await runAction(() =>
+      apiFetch(
+        `/groups/${group.id}/game-days/${group.game_day!.id}/guests/${guest.id}`,
+        { method: "DELETE" }
+      )
+    );
+    if (editingGuest?.id === guest.id) resetGuestForm();
+  }
+
+  function playerName(player: Member) {
+    return player.is_guest ? `${player.name} (${t("guest")})` : player.name;
+  }
+
   async function leaveGroup() {
     if (!group) return;
     await runAction(
@@ -1091,7 +1144,7 @@ function App() {
         {dayStats.map((row) => (
           <div className="member-row" key={row.member.id}>
             <div>
-              <strong>{row.member.name}</strong>
+              <strong>{playerName(row.member)}</strong>
               <div className="member-details">
                 {t("matchesPlayedLong")} {row.played} · {t("goals")} {row.goals} ·{" "}
                 {t("assists")} {row.assists}
@@ -1641,6 +1694,63 @@ function App() {
                             {t("waiting")}
                           </span>
                         </div>
+                        {isAdmin && (
+                          <>
+                            <button
+                              className="secondary-button"
+                              disabled={
+                                gameDay.participants.length >= gameDay.participant_count
+                              }
+                              onClick={() => {
+                                resetGuestForm();
+                                setShowGuestForm(true);
+                              }}
+                            >
+                              + {t("addGuest")}
+                            </button>
+                            {showGuestForm && (
+                              <form className="member-form" onSubmit={saveGuest}>
+                                <div className="form-row">
+                                  <label>
+                                    {t("guestName")}
+                                    <input
+                                      value={guestName}
+                                      onChange={(event) => setGuestName(event.target.value)}
+                                      autoFocus
+                                      required
+                                    />
+                                  </label>
+                                  <label>
+                                    {t("rating")}
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={5}
+                                      step={0.5}
+                                      value={guestRating}
+                                      onChange={(event) =>
+                                        setGuestRating(Number(event.target.value))
+                                      }
+                                      required
+                                    />
+                                  </label>
+                                </div>
+                                <div className="form-actions">
+                                  <button className="primary-button" type="submit">
+                                    {t("save")}
+                                  </button>
+                                  <button
+                                    className="secondary-button"
+                                    type="button"
+                                    onClick={resetGuestForm}
+                                  >
+                                    {t("cancel")}
+                                  </button>
+                                </div>
+                              </form>
+                            )}
+                          </>
+                        )}
                       </>
                     )}
                     {isAdmin && gameDay.status !== "finished" && (
@@ -1942,16 +2052,34 @@ function App() {
                     <div>
                       <h3>{t("registeredPlayers")}</h3>
                       {gameDay.participants.map((player, index) => (
-                        <p key={player.id}>
-                          {index + 1}. {player.name}
-                        </p>
+                        <div className="member-row" key={player.id}>
+                          <span>
+                            {index + 1}. {playerName(player)}
+                          </span>
+                          {isAdmin && player.is_guest && (
+                            <div className="member-actions">
+                              <button
+                                className="secondary-button"
+                                onClick={() => startEditGuest(player)}
+                              >
+                                {t("editMember")}
+                              </button>
+                              <button
+                                className="text-danger-button"
+                                onClick={() => removeGuest(player)}
+                              >
+                                {t("removeGuest")}
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
                     <div>
                       <h3>{t("waitingList")}</h3>
                       {gameDay.waiting_list.map((player, index) => (
                         <p key={player.id}>
-                          {index + 1}. {player.name}
+                          {index + 1}. {playerName(player)}
                         </p>
                       ))}
                     </div>
@@ -2025,7 +2153,7 @@ function App() {
                           editingTeams ? (
                             <div className="team-player-edit-row" key={player.id}>
                               <span>
-                                {player.name} ({player.rating})
+                                {playerName(player)} ({player.rating})
                               </span>
                               <select
                                 value={teamDraft[player.id] ?? ""}
@@ -2046,7 +2174,7 @@ function App() {
                             </div>
                           ) : (
                             <p key={player.id}>
-                              {player.name} ({player.rating})
+                              {playerName(player)} ({player.rating})
                             </p>
                           )
                         )}
@@ -2066,7 +2194,7 @@ function App() {
                           editingTeams ? (
                             <div className="team-player-edit-row" key={player.id}>
                               <span>
-                                {player.name} ({player.rating})
+                                {playerName(player)} ({player.rating})
                               </span>
                               <select
                                 value={teamDraft[player.id] ?? ""}
@@ -2087,7 +2215,7 @@ function App() {
                             </div>
                           ) : (
                             <p key={player.id}>
-                              {player.name} ({player.rating})
+                              {playerName(player)} ({player.rating})
                             </p>
                           )
                         )}
@@ -2273,7 +2401,7 @@ function App() {
                                                   key={player.id}
                                                   value={player.id}
                                                 >
-                                                  {player.name}
+                                                  {playerName(player)}
                                                 </option>
                                               ))}
                                           </optgroup>
@@ -2304,7 +2432,7 @@ function App() {
                                         <option value="">{t("noAssist")}</option>
                                         {assistOptions.map((player) => (
                                           <option key={player.id} value={player.id}>
-                                            {player.name}
+                                            {playerName(player)}
                                           </option>
                                         ))}
                                       </select>
@@ -2376,8 +2504,8 @@ function App() {
                         )}
                         {match.goals.map((goal) => (
                           <p key={goal.id}>
-                            {goal.scorer.name}
-                            {goal.assist ? ` (${goal.assist.name})` : ""}
+                            {playerName(goal.scorer)}
+                            {goal.assist ? ` (${playerName(goal.assist)})` : ""}
                           </p>
                         ))}
                       </div>
@@ -2468,11 +2596,12 @@ function App() {
                               .filter(
                                 (player) =>
                                   !player.is_virtual &&
+                                  !player.is_guest &&
                                   player.id !== currentMembership.id
                               )
                               .map((player) => (
                                 <option key={player.id} value={player.id}>
-                                  {player.name}
+                                  {playerName(player)}
                                 </option>
                               ))}
                           </select>
