@@ -231,6 +231,7 @@ function App() {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [myGroups, setMyGroups] = useState<MyGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -1105,13 +1106,28 @@ function App() {
           </label>
           <label>
             {t("password")}
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              minLength={6}
-              required
-            />
+            <div className="password-field">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                minLength={6}
+                required
+              />
+              <button
+                className="password-toggle"
+                type="button"
+                aria-label={t(showPassword ? "hidePassword" : "showPassword")}
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((current) => !current)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                  {showPassword && <path d="M4 4 20 20" />}
+                </svg>
+              </button>
+            </div>
           </label>
           {error && <div className="error-box">{error}</div>}
           <button className="primary-button" type="submit" disabled={loading}>
@@ -1122,6 +1138,7 @@ function App() {
             type="button"
             onClick={() => {
               setError("");
+              setShowPassword(false);
               setAuthMode(authMode === "login" ? "signup" : "login");
             }}
           >
