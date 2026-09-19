@@ -2074,7 +2074,7 @@ def finish_game_day(
             winners = champion_teams(rows)
             game_day.champion_team_name = " / ".join(winners) if winners else None
             for assignment in game_day.team_assignments:
-                if assignment.team_name in winners and is_real(assignment.membership):
+                if assignment.team_name in winners:
                     db.add(
                         GameDayAward(
                             game_day_id=game_day.id,
