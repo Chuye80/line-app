@@ -11,6 +11,11 @@ const API_URL =
 const DEV_TOOLS_ENABLED =
   import.meta.env.VITE_ENABLE_DEV_TOOLS === "true";
 const LANG_KEY = "lineapp.lang";
+const SELECTED_GROUP_KEY = "lineapp.selectedGroup";
+
+function selectedGroupKey(userId: string) {
+  return `${SELECTED_GROUP_KEY}.${userId}`;
+}
 
 type Member = {
   id: string;
@@ -287,6 +292,7 @@ function App() {
   const membershipStateRef = useRef<string | null>(null);
   const skipNextGroupLoad = useRef(false);
   const isAdminRef = useRef(false);
+  const selectionOwnerRef = useRef<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -596,13 +602,25 @@ function App() {
     const mine: MyGroup[] = boot.groups ?? [];
     setMyGroups(mine);
     if (inviteCode) await loadInvite(inviteCode);
-    let target = selectedGroupId;
+    const userId = session.user.id;
+    const savedGroupId = localStorage.getItem(selectedGroupKey(userId));
+    let target =
+      selectionOwnerRef.current === userId ? selectedGroupId : null;
     if (!target || !mine.some((item) => item.id === target)) {
-      target = mine[0]?.id ?? null;
+      target =
+        mine.find((item) => item.id === savedGroupId)?.id ??
+        mine[0]?.id ??
+        null;
       if (target !== selectedGroupId) {
         skipNextGroupLoad.current = true;
         setSelectedGroupId(target);
       }
+    }
+    selectionOwnerRef.current = userId;
+    if (target) {
+      localStorage.setItem(selectedGroupKey(userId), target);
+    } else {
+      localStorage.removeItem(selectedGroupKey(userId));
     }
     if (target) {
       const known = mine.find((item) => item.id === target);
@@ -684,6 +702,7 @@ function App() {
       setGroup(null);
       setMembership(null);
       setSelectedGroupId(null);
+      selectionOwnerRef.current = null;
       return;
     }
     refreshData().catch((err) =>
@@ -692,6 +711,17 @@ function App() {
     // Switching the simulated identity reloads everything, which is why no
     // other component needs to know the simulation exists.
   }, [session, actAs]);
+
+  useEffect(() => {
+    if (
+      !session ||
+      !selectedGroupId ||
+      selectionOwnerRef.current !== session.user.id
+    ) {
+      return;
+    }
+    localStorage.setItem(selectedGroupKey(session.user.id), selectedGroupId);
+  }, [session?.user.id, selectedGroupId]);
 
   useEffect(() => {
     if (!session || !selectedGroupId) return;
