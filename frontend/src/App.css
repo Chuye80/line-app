@@ -644,6 +644,24 @@ button:disabled {
   font-weight: 600;
 }
 
+.auth-card .language-toggle {
+  width: max-content;
+  align-self: flex-start;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.auth-card .language-toggle select {
+  width: auto;
+  min-width: 86px;
+  min-height: 32px;
+  padding: 4px 8px;
+  color: #1f2937;
+  background-color: white;
+}
+
 .auth-card input {
   padding: 10px 12px;
   border: 1px solid #d1d5db;
