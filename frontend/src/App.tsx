@@ -1371,7 +1371,13 @@ function App() {
                   className={
                     selectedGroupId === item.id ? "group-chip active" : "group-chip"
                   }
-                  onClick={() => setSelectedGroupId(item.id)}
+                  onClick={() => {
+                    localStorage.setItem(
+                      selectedGroupKey(session.user.id),
+                      item.id
+                    );
+                    setSelectedGroupId(item.id);
+                  }}
                 >
                   <strong>{item.name}</strong>
                   <span>{item.is_admin ? t("admin") : t("member")}</span>
