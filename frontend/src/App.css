@@ -15,6 +15,18 @@ select {
   font: inherit;
 }
 
+input,
+select {
+  color: #1f2937;
+  background-color: white;
+  color-scheme: light;
+  -webkit-text-fill-color: #1f2937;
+}
+
+input::-webkit-date-and-time-value {
+  color: #1f2937;
+}
+
 button {
   cursor: pointer;
 }
