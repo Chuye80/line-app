@@ -151,6 +151,15 @@ type StatRow = Member & {
 
 const RATING_STEPS = [1, 2, 3, 4, 5];
 
+function championSquads(champions: Member[]) {
+  const squads = new Map<string, string[]>();
+  champions.forEach((champion) => {
+    const team = champion.team_name ?? "";
+    squads.set(team, [...(squads.get(team) ?? []), champion.name]);
+  });
+  return [...squads.values()];
+}
+
 function StarRating({
   value,
   onChange,
@@ -414,6 +423,14 @@ function App() {
     setGroup((current) => {
       if (!current) return current;
       if (data.status === "finished") {
+        const awards = data.awards ?? { champions: [], mvps: [] };
+        const champions = awards.champions.map((champion) => ({
+          ...champion,
+          team_name: data.teams.find((team) =>
+            team.players.some((player) => player.id === champion.id)
+          )?.name,
+        }));
+        const historyAwards = { ...awards, champions };
         // The day stops being the one being organised, but it is still the one
         // being celebrated and voted on, so it moves across rather than away.
         return {
@@ -427,7 +444,7 @@ function App() {
               status: data.status,
               is_rotating: data.is_rotating,
               champion_team_name: data.champion_team_name,
-              awards: data.awards ?? { champions: [], mvps: [] },
+              awards: historyAwards,
             },
             ...current.history.filter((item) => item.id !== data.id),
           ],
@@ -2797,19 +2814,25 @@ function App() {
               {group.history.length > 0 && (
                 <section className="card">
                   <h2>{t("history")}</h2>
-                  {group.history.map((item) => (
-                    <p key={item.id}>
-                      {new Date(item.game_datetime).toLocaleString()}
-                      {item.champion_team_name
-                        ? ` · ${t("champion")}: ${item.champion_team_name}`
-                        : ""}
-                      {item.awards.mvps.length
-                        ? ` · ${t("mvpAnnounced")}: ${item.awards.mvps
-                            .map((mvp) => mvp.name)
-                            .join(", ")}`
-                        : ""}
-                    </p>
-                  ))}
+                  {group.history.map((item) => {
+                    const squads = championSquads(item.awards.champions);
+                    return (
+                      <p key={item.id}>
+                        {new Date(item.game_datetime).toLocaleString()}
+                        {squads.map(
+                          (squad, index) =>
+                            ` · ${t("championPlayers")}${
+                              squads.length > 1 ? ` ${index + 1}` : ""
+                            }: ${squad.join(", ")}`
+                        )}
+                        {item.awards.mvps.length
+                          ? ` · ${t("mvpAnnounced")}: ${item.awards.mvps
+                              .map((mvp) => mvp.name)
+                              .join(", ")}`
+                          : ""}
+                      </p>
+                    );
+                  })}
                 </section>
               )}
             </>

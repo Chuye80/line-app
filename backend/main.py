@@ -744,6 +744,29 @@ def read_group_payload(group_id: UUID, user_id: UUID) -> dict:
     payload["members"] = [
         member for member in payload.get("members", []) if not member.get("is_guest")
     ]
+    champion_teams_by_member = fetch_json(
+        """
+        SELECT coalesce(
+          jsonb_object_agg(
+            a.game_day_id::text || ':' || a.membership_id::text,
+            ta.team_name
+          ),
+          '{}'::jsonb
+        )
+        FROM game_day_awards a
+        JOIN game_days gd ON gd.id = a.game_day_id
+        JOIN team_assignments ta
+          ON ta.game_day_id = a.game_day_id
+         AND ta.membership_id = a.membership_id
+        WHERE gd.group_id = CAST(:gid AS uuid)
+          AND a.award_type = 'champion'
+        """,
+        {"gid": str(group_id)},
+    )
+    for item in payload.get("history", []):
+        for champion in item.get("awards", {}).get("champions", []):
+            key = f"{item['id']}:{champion['id']}"
+            champion["team_name"] = champion_teams_by_member.get(key)
     attach_standings(payload.get("game_day"))
     # The finished day carries the final table, so it needs standings too.
     attach_standings(payload.get("finished_game_day"))
