@@ -266,6 +266,7 @@ function App() {
   const [liveTab, setLiveTab] = useState<
     "matches" | "standings" | "stats" | "teams"
   >("matches");
+  const [liveWorkspace, setLiveWorkspace] = useState(false);
 
   const [newGroupName, setNewGroupName] = useState("");
   const [showMemberForm, setShowMemberForm] = useState(false);
@@ -862,6 +863,12 @@ function App() {
   }, [group?.game_day?.teams, group?.game_day?.unassigned]);
 
   useEffect(() => {
+    if (liveWorkspace && group?.game_day?.status !== "live") {
+      setLiveWorkspace(false);
+    }
+  }, [liveWorkspace, group?.game_day?.status]);
+
+  useEffect(() => {
     if (invitePreview?.state === "member") {
       setSelectedGroupId(invitePreview.id);
     }
@@ -1236,7 +1243,7 @@ function App() {
       </header>
 
       <div className="page-layout">
-        {isDeveloper && DEV_TOOLS_ENABLED && (
+        {isDeveloper && DEV_TOOLS_ENABLED && !liveWorkspace && (
           <aside className="developer-panel">
             <h3>{t("developerTools")}</h3>
             <button
@@ -1332,9 +1339,9 @@ function App() {
           </aside>
         )}
 
-        <main className="container">
+        <main className={liveWorkspace ? "container live-workspace" : "container"}>
           {actAs && (
-            <div className="simulation-banner">
+            <div className="simulation-banner group-page-only">
               <span>
                 {t("simulating")} <strong>{simulatedName || "…"}</strong>
               </span>
@@ -1346,7 +1353,7 @@ function App() {
           {error && <div className="error-box">{error}</div>}
 
           {invitePreview && invitePreview.state !== "member" && (
-            <section className="card join-card">
+            <section className="card join-card group-page-only">
               <h2>
                 {t("invitedTo")} {invitePreview.name}
               </h2>
@@ -1372,7 +1379,7 @@ function App() {
             </section>
           )}
 
-          <section className="card">
+          <section className="card group-page-only">
             <div className="section-header">
               <div>
                 <h2>{t("myGroups")}</h2>
@@ -1418,10 +1425,21 @@ function App() {
           </section>
 
           {group && isMember && (
-            <section className="card group-title-card">
+            <section className="card group-title-card group-page-only">
               <div className="group-title-row">
                 <h2>{group.name}</h2>
                 <div className="header-actions">
+                  {isLive && (
+                    <button
+                      className="primary-button"
+                      onClick={() => {
+                        setTab("group");
+                        setLiveWorkspace(true);
+                      }}
+                    >
+                      {t("enterLiveGameDay")}
+                    </button>
+                  )}
                   <button
                     className={tab === "group" ? "primary-button" : "secondary-button"}
                     onClick={() => setTab("group")}
@@ -1452,7 +1470,7 @@ function App() {
           )}
 
           {group && isMember && showExitOptions && isSoleRealAdmin && (
-            <section className="card exit-options" aria-live="polite">
+            <section className="card exit-options group-page-only" aria-live="polite">
               <h2>{t("soleAdminExitTitle")}</h2>
               <p>{t("soleAdminExitHelp")}</p>
               {otherRealMembers.length > 0 && (
@@ -1501,7 +1519,7 @@ function App() {
           )}
 
           {group && isAdmin && tab === "group" && (
-            <section className="card">
+            <section className="card group-page-only">
               <h2>{t("invite")}</h2>
               <p>
                 {t("inviteCode")}: <strong>{group.invite_code}</strong>
@@ -1542,7 +1560,7 @@ function App() {
           )}
 
           {group && isAdmin && joinRequests.length > 0 && (
-            <section className="card">
+            <section className="card group-page-only">
               <h2>{t("pendingJoinRequests")}</h2>
               {joinRequests.map((request) => (
                 <div className="request-row" key={request.id}>
@@ -1588,7 +1606,7 @@ function App() {
           )}
 
           {group && isMember && tab === "stats" && (
-            <section className="card">
+            <section className="card group-page-only">
               <div className="section-header">
                 <h2>{t("statistics")}</h2>
                 <div className="header-actions">
@@ -1638,7 +1656,7 @@ function App() {
 
           {group && isMember && tab === "group" && (
             <>
-              <section className="card">
+              <section className="card group-page-only">
                 <h2>{t("nextGameDay")}</h2>
                 {!gameDay ? (
                   <>
@@ -1880,7 +1898,52 @@ function App() {
               </section>
 
               {isLive && (
-                <section className="card live-board">
+                <section className="card live-board live-workspace-only">
+                  <div className="live-workspace-header">
+                    <div>
+                      <button
+                        className="secondary-button"
+                        onClick={() => setLiveWorkspace(false)}
+                      >
+                        ← {t("backToGroup")}
+                      </button>
+                      <h2>{group.name}</h2>
+                    </div>
+                    {isAdmin && gameDay && (
+                      <div className="form-actions">
+                        <button
+                          className="primary-button"
+                          onClick={() =>
+                            runAction(() =>
+                              apiFetch(
+                                `/groups/${group.id}/game-days/${gameDay.id}/finish`,
+                                { method: "POST" }
+                              )
+                            )
+                          }
+                        >
+                          {t("finishGameDay")}
+                        </button>
+                        <button
+                          className="danger-button"
+                          onClick={() =>
+                            runAction(() =>
+                              apiFetch(
+                                `/groups/${group.id}/game-days/${gameDay.id}`,
+                                { method: "DELETE" }
+                              )
+                            ).then(() =>
+                              setGroup((current) =>
+                                current ? { ...current, game_day: null } : current
+                              )
+                            )
+                          }
+                        >
+                          {t("deleteGameDay")}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <div className="live-banner">
                     <span className="live-dot" aria-hidden="true" />
                     <strong>{t("liveGameDay")}</strong>
@@ -1909,13 +1972,13 @@ function App() {
               )}
 
               {isLive && liveTab === "stats" && (
-                <section className="card">
+                <section className="card live-workspace-only">
                   <h2>{t("dayStatistics")}</h2>
                   {dayStatsRows}
                 </section>
               )}
 
-              <section className="card">
+              <section className="card group-page-only">
                 <div className="section-header">
                   <div>
                     <h2>{t("groupMembers")}</h2>
@@ -2116,7 +2179,7 @@ function App() {
               </section>
 
               {gameDay && gameDay.status === "upcoming" && (
-                <section className="card">
+                <section className="card group-page-only">
                   <h2>{t("gameRegistration")}</h2>
                   <div className="registration-columns">
                     <div>
@@ -2158,7 +2221,13 @@ function App() {
               )}
 
               {gameDay && (!isLive || liveTab === "teams") && (
-                <section className="card">
+                <section
+                  className={
+                    isLive
+                      ? "card live-workspace-only"
+                      : "card group-page-only"
+                  }
+                >
                   <h2>{t("generateTeams")}</h2>
                   {isAdmin && (
                     <button
@@ -2296,7 +2365,7 @@ function App() {
               )}
 
               {isLive && liveTab === "matches" && gameDay && (
-                <section className="card">
+                <section className="card live-workspace-only">
                   <h2>{t("matches")}</h2>
                   {isAdmin && teamNames.length >= 2 && (
                     <div className="form-panel">
@@ -2588,7 +2657,13 @@ function App() {
                 !gameDay.is_rotating &&
                 gameDay.standings.length > 0 &&
                 (!isLive || liveTab === "standings") && (
-                <section className="card">
+                <section
+                  className={
+                    isLive
+                      ? "card live-workspace-only"
+                      : "card group-page-only"
+                  }
+                >
                   <h2>{t("standings")}</h2>
                   {gameDay.standings.map((row) => (
                     <p key={row.name}>
@@ -2602,7 +2677,7 @@ function App() {
               )}
 
               {finishedGameDay && (
-                <section className="card celebration-card">
+                <section className="card celebration-card group-page-only">
                   {!finishedGameDay.is_rotating &&
                     finishedGameDay.champion_team_name && (
                       <>
@@ -2719,7 +2794,7 @@ function App() {
                 </section>
               )}
 
-              <section className="card">
+              <section className="card group-page-only">
                 <h2>{t("ratingSurvey")}</h2>
                 {group.survey?.status === "open" ? (
                   <>
@@ -2812,7 +2887,7 @@ function App() {
               </section>
 
               {group.history.length > 0 && (
-                <section className="card">
+                <section className="card group-page-only">
                   <h2>{t("history")}</h2>
                   {group.history.map((item) => {
                     const squads = championSquads(item.awards.champions);

@@ -801,6 +801,33 @@ button:disabled {
   gap: 8px;
 }
 
+.live-workspace-only {
+  display: none;
+}
+
+.live-workspace .group-page-only {
+  display: none;
+}
+
+.live-workspace .live-workspace-only {
+  display: block;
+}
+
+.live-workspace .live-board.live-workspace-only {
+  display: flex;
+}
+
+.live-workspace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.live-workspace-header h2 {
+  margin: 12px 0 0;
+}
+
 .goal-row {
   align-items: flex-end;
 }
@@ -958,6 +985,10 @@ button:disabled {
 
   .form-actions {
     flex-wrap: wrap;
+  }
+
+  .live-workspace-header {
+    flex-direction: column;
   }
 
   .survey-row {
