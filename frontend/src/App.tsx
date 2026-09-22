@@ -17,6 +17,16 @@ function selectedGroupKey(userId: string) {
   return `${SELECTED_GROUP_KEY}.${userId}`;
 }
 
+function updateGroupUrl(groupId: string | null) {
+  const url = new URL(window.location.href);
+  if (groupId) {
+    url.searchParams.set("group", groupId);
+  } else {
+    url.searchParams.delete("group");
+  }
+  window.history.replaceState(window.history.state, "", url);
+}
+
 type Member = {
   id: string;
   user_id: string | null;
@@ -622,8 +632,10 @@ function App() {
     if (inviteCode) await loadInvite(inviteCode);
     const userId = session.user.id;
     const savedGroupId = localStorage.getItem(selectedGroupKey(userId));
+    const urlGroupId = new URLSearchParams(window.location.search).get("group");
     let target =
-      selectionOwnerRef.current === userId ? selectedGroupId : null;
+      mine.find((item) => item.id === urlGroupId)?.id ??
+      (selectionOwnerRef.current === userId ? selectedGroupId : null);
     if (!target || !mine.some((item) => item.id === target)) {
       target =
         mine.find((item) => item.id === savedGroupId)?.id ??
@@ -640,6 +652,7 @@ function App() {
     } else {
       localStorage.removeItem(selectedGroupKey(userId));
     }
+    updateGroupUrl(target);
     if (target) {
       const known = mine.find((item) => item.id === target);
       if (known) {
@@ -739,6 +752,7 @@ function App() {
       return;
     }
     localStorage.setItem(selectedGroupKey(session.user.id), selectedGroupId);
+    updateGroupUrl(selectedGroupId);
   }, [session?.user.id, selectedGroupId]);
 
   useEffect(() => {
@@ -1400,6 +1414,7 @@ function App() {
                       selectedGroupKey(session.user.id),
                       item.id
                     );
+                    updateGroupUrl(item.id);
                     setSelectedGroupId(item.id);
                   }}
                 >
