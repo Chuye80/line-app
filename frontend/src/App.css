@@ -49,6 +49,9 @@ button:disabled {
 .header h1 {
   margin: 0;
   font-size: 28px;
+  font-weight: 700;
+  color: #1f2937;
+  -webkit-text-fill-color: #1f2937;
 }
 
 .header p {
@@ -104,6 +107,7 @@ button:disabled {
 
 .card h2 {
   margin-top: 0;
+  font-weight: 700;
   color: #1f2937;
   -webkit-text-fill-color: #1f2937;
 }
