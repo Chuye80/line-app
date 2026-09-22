@@ -641,10 +641,10 @@ function App() {
         mine.find((item) => item.id === savedGroupId)?.id ??
         mine[0]?.id ??
         null;
-      if (target !== selectedGroupId) {
-        skipNextGroupLoad.current = true;
-        setSelectedGroupId(target);
-      }
+    }
+    if (target !== selectedGroupId) {
+      skipNextGroupLoad.current = true;
+      setSelectedGroupId(target);
     }
     selectionOwnerRef.current = userId;
     if (target) {
