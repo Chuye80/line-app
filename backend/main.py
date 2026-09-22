@@ -770,6 +770,9 @@ def read_group_payload(group_id: UUID, user_id: UUID) -> dict:
     attach_standings(payload.get("game_day"))
     # The finished day carries the final table, so it needs standings too.
     attach_standings(payload.get("finished_game_day"))
+    invite_code = payload.get("invite_code")
+    if invite_code:
+        payload["invite_link"] = f"{invite_origin()}/?invite={invite_code}"
     return payload
 
 
