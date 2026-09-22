@@ -104,6 +104,8 @@ button:disabled {
 
 .card h2 {
   margin-top: 0;
+  color: #1f2937;
+  -webkit-text-fill-color: #1f2937;
 }
 
 .group-title-card {
