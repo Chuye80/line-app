@@ -333,6 +333,7 @@ function App() {
   const [mvpChoice, setMvpChoice] = useState("");
   const [surveyDraft, setSurveyDraft] = useState<Record<string, number>>({});
   const [copied, setCopied] = useState(false);
+  const [showGroupActions, setShowGroupActions] = useState(false);
   const [showExitOptions, setShowExitOptions] = useState(false);
   const [transferTarget, setTransferTarget] = useState("");
   const membershipStateRef = useRef<string | null>(null);
@@ -364,6 +365,23 @@ function App() {
     ) ?? [];
   const otherRealAdmins = otherRealMembers.filter((member) => member.is_admin);
   const isSoleRealAdmin = Boolean(isAdmin && otherRealAdmins.length === 0);
+  const sortedGroupMembers = useMemo(() => {
+    const members = group?.members ?? [];
+    return [
+      ...members.filter((member) => member.is_admin),
+      ...members.filter(
+        (member) =>
+          !member.is_admin && !member.is_virtual && member.is_subscriber
+      ),
+      ...members.filter(
+        (member) =>
+          !member.is_admin && !member.is_virtual && !member.is_subscriber
+      ),
+      ...members.filter(
+        (member) => !member.is_admin && member.is_virtual
+      ),
+    ];
+  }, [group?.members]);
   const surveyEligibleMembers =
     group?.members.filter(
       (member) =>
@@ -814,6 +832,12 @@ function App() {
   }, [session?.user.id, selectedGroupId]);
 
   useEffect(() => {
+    setShowGroupActions(false);
+    setShowExitOptions(false);
+    setTransferTarget("");
+  }, [selectedGroupId]);
+
+  useEffect(() => {
     if (!session || !selectedGroupId) return;
     if (skipNextGroupLoad.current) {
       skipNextGroupLoad.current = false;
@@ -1228,6 +1252,7 @@ function App() {
         }),
       "reload-app"
     );
+    setShowGroupActions(false);
     setShowExitOptions(false);
     setSelectedGroupId(null);
   }
@@ -1243,6 +1268,7 @@ function App() {
         }),
       "reload-app"
     );
+    setShowGroupActions(false);
     setShowExitOptions(false);
     setTransferTarget("");
     setSelectedGroupId(null);
@@ -1257,6 +1283,7 @@ function App() {
         }),
       "reload-app"
     );
+    setShowGroupActions(false);
     setShowExitOptions(false);
     setSelectedGroupId(null);
   }
@@ -1419,6 +1446,7 @@ function App() {
           <p className="muted-text">Version 1.0.0-beta.5</p>
         </div>
         <div className="header-actions">
+          {languageToggle}
           <button
             className="secondary-button"
             onClick={() => {
@@ -1430,7 +1458,6 @@ function App() {
           >
             {t("myProfile")}
           </button>
-          {languageToggle}
           <button className="secondary-button" onClick={() => supabase.auth.signOut()}>
             {t("logOut")}
           </button>
@@ -1703,18 +1730,51 @@ function App() {
                   >
                     {t("statistics")}
                   </button>
-                  <button
-                    className="text-danger-button"
-                    onClick={() => {
-                      if (isSoleRealAdmin) {
-                        setShowExitOptions(true);
-                      } else if (window.confirm(t("leaveConfirm"))) {
-                        leaveGroup();
+                  <div className="group-actions-wrapper">
+                    <button
+                      className="secondary-button"
+                      aria-expanded={showGroupActions}
+                      onClick={() =>
+                        setShowGroupActions((current) => !current)
                       }
-                    }}
-                  >
-                    {t("leaveGroup")}
-                  </button>
+                    >
+                      {t("groupActions")}
+                    </button>
+                    {showGroupActions && (
+                      <div className="group-actions-menu" role="menu">
+                        <button
+                          className="text-danger-button"
+                          role="menuitem"
+                          onClick={() => {
+                            setShowGroupActions(false);
+                            if (isSoleRealAdmin) {
+                              setShowExitOptions(true);
+                            } else if (window.confirm(t("leaveConfirm"))) {
+                              leaveGroup();
+                            }
+                          }}
+                        >
+                          {t("leaveGroup")}
+                        </button>
+                        {isAdmin && (
+                          <button
+                            className="danger-button"
+                            role="menuitem"
+                            onClick={deleteGroup}
+                          >
+                            {t("deleteGroup")}
+                          </button>
+                        )}
+                        <button
+                          className="secondary-button"
+                          role="menuitem"
+                          onClick={() => setShowGroupActions(false)}
+                        >
+                          {t("cancel")}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </section>
@@ -1802,9 +1862,6 @@ function App() {
                   }}
                 >
                   {t("regenerateInvite")}
-                </button>
-                <button className="danger-button" onClick={deleteGroup}>
-                  {t("deleteGroup")}
                 </button>
               </div>
             </section>
@@ -2408,7 +2465,7 @@ function App() {
                       </form>
                     )}
                     <div className="member-list">
-                  {group.members.map((member) => {
+                  {sortedGroupMembers.map((member) => {
                     const participant = Boolean(
                       gameDay?.participants.some((item) => item.id === member.id)
                     );
