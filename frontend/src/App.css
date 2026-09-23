@@ -133,6 +133,26 @@ button:disabled {
   margin-bottom: 2px;
 }
 
+.collapsible-header {
+  cursor: pointer;
+}
+
+.collapsible-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chevron {
+  font-size: 22px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.chevron.expanded {
+  transform: rotate(90deg);
+}
+
 .section-header span,
 .muted-text {
   color: #6b7280;

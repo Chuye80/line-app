@@ -279,6 +279,7 @@ function App() {
   const [liveWorkspace, setLiveWorkspace] = useState(false);
 
   const [newGroupName, setNewGroupName] = useState("");
+  const [membersExpanded, setMembersExpanded] = useState(false);
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [memberName, setMemberName] = useState("");
@@ -1994,18 +1995,41 @@ function App() {
               )}
 
               <section className="card group-page-only">
-                <div className="section-header">
-                  <div>
-                    <h2>{t("groupMembers")}</h2>
-                    <span>
-                      {group.members.length} {t("members")}
+                <div
+                  className="section-header collapsible-header"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={membersExpanded}
+                  onClick={() => setMembersExpanded((current) => !current)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setMembersExpanded((current) => !current);
+                    }
+                  }}
+                >
+                  <div className="collapsible-title">
+                    <span
+                      className={membersExpanded ? "chevron expanded" : "chevron"}
+                      aria-hidden="true"
+                    >
+                      ›
                     </span>
+                    <div>
+                      <h2>{t("groupMembers")}</h2>
+                      <span>
+                        {group.members.length} {t("members")}
+                      </span>
+                    </div>
                   </div>
                   {isAdmin && (
                     <button
                       className="primary-button"
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
                         resetMemberForm();
+                        setMembersExpanded(true);
                         setShowMemberForm(true);
                       }}
                     >
@@ -2013,8 +2037,10 @@ function App() {
                     </button>
                   )}
                 </div>
-                {showMemberForm && isAdmin && (
-                  <form className="member-form" onSubmit={saveMember}>
+                {membersExpanded && (
+                  <>
+                    {showMemberForm && isAdmin && (
+                      <form className="member-form" onSubmit={saveMember}>
                     <div className="form-row">
                       <label>
                         {t("name")}
@@ -2075,9 +2101,9 @@ function App() {
                         {t("cancel")}
                       </button>
                     </div>
-                  </form>
-                )}
-                <div className="member-list">
+                      </form>
+                    )}
+                    <div className="member-list">
                   {group.members.map((member) => {
                     const participant = Boolean(
                       gameDay?.participants.some((item) => item.id === member.id)
@@ -2190,7 +2216,9 @@ function App() {
                       </div>
                     );
                   })}
-                </div>
+                    </div>
+                  </>
+                )}
               </section>
 
               {gameDay && gameDay.status === "upcoming" && (
