@@ -59,6 +59,19 @@ button:disabled {
   color: #6b7280;
 }
 
+.profile-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.profile-details > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .page-layout {
   display: flex;
   align-items: flex-start;

@@ -97,6 +97,10 @@ class CurrentUser(BaseModel):
     email: str | None = None
 
 
+class UpdateProfileRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=80)
+
+
 class CreateGroupRequest(BaseModel):
     name: str = Field(min_length=1)
 
@@ -1151,6 +1155,41 @@ def me(user: CurrentUser = Depends(get_current_user)):
         """,
         {"uid": str(user.id), "email": user.email},
     )
+
+
+@app.get("/profile")
+def get_profile(
+    user: CurrentUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "display_name": profile_name(db, user.id),
+    }
+
+
+@app.put("/profile")
+def update_profile(
+    body: UpdateProfileRequest,
+    user: CurrentUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    display_name = body.display_name.strip()
+    if not display_name:
+        raise HTTPException(status_code=400, detail="Display name cannot be empty")
+    profile = db.get(Profile, user.id)
+    if profile is None:
+        profile = Profile(id=user.id, display_name=display_name)
+        db.add(profile)
+    else:
+        profile.display_name = display_name
+    db.commit()
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "display_name": display_name,
+    }
 
 
 @app.get("/bootstrap")

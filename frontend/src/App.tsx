@@ -158,6 +158,12 @@ type GroupMessage = {
   created_at: string;
 };
 
+type UserProfile = {
+  id: string;
+  email: string | null;
+  display_name: string;
+};
+
 type StatRow = Member & {
   game_days_played: number;
   matches_played: number;
@@ -264,6 +270,12 @@ function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileDraft, setProfileDraft] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
 
   const [myGroups, setMyGroups] = useState<MyGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -431,6 +443,15 @@ function App() {
     } catch {
       return "Action failed";
     }
+  }
+
+  async function loadProfile() {
+    const response = await apiFetch("/profile");
+    if (!response.ok) throw new Error(await parseError(response));
+    const data = (await response.json()) as UserProfile;
+    setProfile(data);
+    setProfileDraft(data.display_name);
+    return data;
   }
 
   function isGameDayPayload(data: unknown): data is GameDay {
@@ -750,6 +771,22 @@ function App() {
 
   useEffect(() => {
     if (!session) {
+      setProfile(null);
+      setShowProfile(false);
+      setEditingProfile(false);
+      setProfileDraft("");
+      setProfileError("");
+      return;
+    }
+    loadProfile().catch((err) =>
+      setProfileError(
+        err instanceof Error ? err.message : t("profileLoadFailed")
+      )
+    );
+  }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!session) {
       setMyGroups([]);
       setGroup(null);
       setMembership(null);
@@ -841,7 +878,11 @@ function App() {
           if (!cancelled) {
             setChatMessages((current) =>
               current.length === messages.length &&
-              current.every((item, index) => item.id === messages[index]?.id)
+              current.every(
+                (item, index) =>
+                  item.id === messages[index]?.id &&
+                  item.sender_name === messages[index]?.sender_name
+              )
                 ? current
                 : messages
             );
@@ -1016,6 +1057,41 @@ function App() {
     if (created?.id) {
       skipNextGroupLoad.current = true;
       setSelectedGroupId(created.id);
+    }
+  }
+
+  async function saveProfile(event: FormEvent) {
+    event.preventDefault();
+    const displayName = profileDraft.trim();
+    if (!displayName || profileSaving) return;
+    setProfileSaving(true);
+    setProfileError("");
+    try {
+      const response = await apiFetch("/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: displayName }),
+      });
+      if (!response.ok) throw new Error(await parseError(response));
+      const updated = (await response.json()) as UserProfile;
+      setProfile(updated);
+      setProfileDraft(updated.display_name);
+      setEditingProfile(false);
+      setChatMessages((current) =>
+        current.map((message) =>
+          message.sender_user_id === updated.id
+            ? { ...message, sender_name: updated.display_name }
+            : message
+        )
+      );
+      refreshData().catch(() => {});
+      if (group && tab === "stats") loadStats(group.id).catch(() => {});
+    } catch (err) {
+      setProfileError(
+        err instanceof Error ? err.message : t("profileSaveFailed")
+      );
+    } finally {
+      setProfileSaving(false);
     }
   }
 
@@ -1343,6 +1419,17 @@ function App() {
           <p className="muted-text">Version 1.0.0-beta.5</p>
         </div>
         <div className="header-actions">
+          <button
+            className="secondary-button"
+            onClick={() => {
+              setShowProfile((current) => !current);
+              setEditingProfile(false);
+              setProfileDraft(profile?.display_name ?? "");
+              if (profile) setProfileError("");
+            }}
+          >
+            {t("myProfile")}
+          </button>
           {languageToggle}
           <button className="secondary-button" onClick={() => supabase.auth.signOut()}>
             {t("logOut")}
@@ -1448,6 +1535,61 @@ function App() {
         )}
 
         <main className={liveWorkspace ? "container live-workspace" : "container"}>
+          {showProfile && (
+            <section className="card profile-card">
+              <h2>{t("myProfile")}</h2>
+              {editingProfile ? (
+                <form className="form-panel" onSubmit={saveProfile}>
+                  <label>
+                    {t("displayName")}
+                    <input
+                      value={profileDraft}
+                      maxLength={80}
+                      onChange={(event) => setProfileDraft(event.target.value)}
+                      required
+                    />
+                  </label>
+                  <div className="form-actions">
+                    <button
+                      className="primary-button"
+                      type="submit"
+                      disabled={!profileDraft.trim() || profileSaving}
+                    >
+                      {t("save")}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => {
+                        setEditingProfile(false);
+                        setProfileDraft(profile?.display_name ?? "");
+                        setProfileError("");
+                      }}
+                    >
+                      {t("cancel")}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="profile-details">
+                  <div>
+                    <span className="muted-text">{t("displayName")}</span>
+                    <strong>
+                      {profile?.display_name ?? t("loading")}
+                    </strong>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    disabled={!profile}
+                    onClick={() => setEditingProfile(true)}
+                  >
+                    {t("edit")}
+                  </button>
+                </div>
+              )}
+              {profileError && <p className="chat-error">{profileError}</p>}
+            </section>
+          )}
           {actAs && (
             <div className="simulation-banner group-page-only">
               <span>
