@@ -150,6 +150,14 @@ type JoinRequest = {
   status: string;
 };
 
+type GroupMessage = {
+  id: string;
+  sender_user_id: string;
+  sender_name: string;
+  message: string;
+  created_at: string;
+};
+
 type StatRow = Member & {
   game_days_played: number;
   matches_played: number;
@@ -279,6 +287,11 @@ function App() {
   const [liveWorkspace, setLiveWorkspace] = useState(false);
 
   const [newGroupName, setNewGroupName] = useState("");
+  const [chatExpanded, setChatExpanded] = useState(true);
+  const [chatMessages, setChatMessages] = useState<GroupMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState("");
   const [membersExpanded, setMembersExpanded] = useState(false);
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
@@ -314,6 +327,7 @@ function App() {
   const skipNextGroupLoad = useRef(false);
   const isAdminRef = useRef(false);
   const selectionOwnerRef = useRef<string | null>(null);
+  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -604,6 +618,12 @@ function App() {
     if (response.ok) setStats(await response.json());
   }
 
+  async function loadGroupMessages(groupId: string) {
+    const response = await apiFetch(`/groups/${groupId}/messages`);
+    if (!response.ok) throw new Error(await parseError(response));
+    return (await response.json()) as GroupMessage[];
+  }
+
   async function loadInvite(code: string) {
     const response = await apiFetch(`/invite/${code}`);
     if (!response.ok) {
@@ -808,6 +828,50 @@ function App() {
   }, [tab, selectedGroupId, membership?.state]);
 
   useEffect(() => {
+    setChatMessages([]);
+    setChatDraft("");
+    setChatError("");
+    setChatExpanded(true);
+    if (!session || !selectedGroupId || membership?.state !== "member") return;
+
+    let cancelled = false;
+    const refreshMessages = () => {
+      loadGroupMessages(selectedGroupId)
+        .then((messages) => {
+          if (!cancelled) {
+            setChatMessages((current) =>
+              current.length === messages.length &&
+              current.every((item, index) => item.id === messages[index]?.id)
+                ? current
+                : messages
+            );
+            setChatError("");
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setChatError(
+              err instanceof Error ? err.message : t("chatLoadFailed")
+            );
+          }
+        });
+    };
+
+    refreshMessages();
+    const timer = window.setInterval(refreshMessages, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [session?.user.id, selectedGroupId, membership?.state, actAs]);
+
+  useEffect(() => {
+    if (!chatExpanded) return;
+    const messageArea = chatMessagesRef.current;
+    if (messageArea) messageArea.scrollTop = messageArea.scrollHeight;
+  }, [chatMessages, chatExpanded]);
+
+  useEffect(() => {
     const clock = window.setInterval(() => {
       setNow(new Date());
     }, 1000);
@@ -952,6 +1016,35 @@ function App() {
     if (created?.id) {
       skipNextGroupLoad.current = true;
       setSelectedGroupId(created.id);
+    }
+  }
+
+  async function sendGroupMessage(event: FormEvent) {
+    event.preventDefault();
+    const message = chatDraft.trim();
+    if (!group || !message || chatSending) return;
+    setChatSending(true);
+    setChatError("");
+    try {
+      const response = await apiFetch(`/groups/${group.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      if (!response.ok) throw new Error(await parseError(response));
+      const created = (await response.json()) as GroupMessage;
+      setChatMessages((current) =>
+        current.some((item) => item.id === created.id)
+          ? current
+          : [...current, created]
+      );
+      setChatDraft("");
+    } catch (err) {
+      setChatError(
+        err instanceof Error ? err.message : t("chatSendFailed")
+      );
+    } finally {
+      setChatSending(false);
     }
   }
 
@@ -1672,6 +1765,75 @@ function App() {
 
           {group && isMember && tab === "group" && (
             <>
+              <section className="card group-chat-card group-page-only">
+                <div
+                  className="section-header collapsible-header"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={chatExpanded}
+                  onClick={() => setChatExpanded((current) => !current)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setChatExpanded((current) => !current);
+                    }
+                  }}
+                >
+                  <div className="collapsible-title">
+                    <span
+                      className={chatExpanded ? "chevron expanded" : "chevron"}
+                      aria-hidden="true"
+                    >
+                      ›
+                    </span>
+                    <h2>{t("groupChat")}</h2>
+                  </div>
+                </div>
+                {chatExpanded && (
+                  <>
+                    <div className="chat-messages" ref={chatMessagesRef}>
+                      {chatMessages.length === 0 && !chatError && (
+                        <p className="muted-text">{t("noChatMessages")}</p>
+                      )}
+                      {chatMessages.map((message) => (
+                        <div className="chat-message" key={message.id}>
+                          <div className="chat-message-meta">
+                            <strong>{message.sender_name}</strong>
+                            <time dateTime={message.created_at}>
+                              {new Date(message.created_at).toLocaleString(
+                                lang === "he" ? "he-IL" : "en-US",
+                                {
+                                  dateStyle: "short",
+                                  timeStyle: "short",
+                                }
+                              )}
+                            </time>
+                          </div>
+                          <p>{message.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {chatError && <p className="chat-error">{chatError}</p>}
+                    <form className="chat-form" onSubmit={sendGroupMessage}>
+                      <input
+                        value={chatDraft}
+                        maxLength={1000}
+                        placeholder={t("chatMessagePlaceholder")}
+                        aria-label={t("chatMessagePlaceholder")}
+                        onChange={(event) => setChatDraft(event.target.value)}
+                      />
+                      <button
+                        className="primary-button"
+                        type="submit"
+                        disabled={!chatDraft.trim() || chatSending}
+                      >
+                        {t("send")}
+                      </button>
+                    </form>
+                  </>
+                )}
+              </section>
+
               <section className="card group-page-only">
                 <h2>{t("nextGameDay")}</h2>
                 {!gameDay ? (

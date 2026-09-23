@@ -135,6 +135,10 @@ class JoinWithInviteRequest(BaseModel):
     invite_code: str = Field(min_length=1)
 
 
+class CreateGroupMessageRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+
+
 class TeamAssignmentItem(BaseModel):
     membership_id: UUID
     team_name: str | None = None
@@ -1279,6 +1283,74 @@ def get_group(
     user: CurrentUser = Depends(get_current_user),
 ):
     return read_group_payload(group_id, user.id)
+
+
+@app.get("/groups/{group_id}/messages")
+def get_group_messages(
+    group_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_membership(db, group, user)
+    return fetch_json(
+        """
+        SELECT coalesce(
+          jsonb_agg(to_jsonb(messages) ORDER BY messages.created_at),
+          '[]'::jsonb
+        )
+        FROM (
+          SELECT
+            gm.id::text AS id,
+            gm.sender_user_id::text AS sender_user_id,
+            coalesce(p.display_name, 'Player') AS sender_name,
+            gm.message,
+            gm.created_at
+          FROM group_messages gm
+          LEFT JOIN profiles p ON p.id = gm.sender_user_id
+          WHERE gm.group_id = CAST(:gid AS uuid)
+          ORDER BY gm.created_at DESC
+          LIMIT 100
+        ) messages
+        """,
+        {"gid": str(group_id)},
+    )
+
+
+@app.post("/groups/{group_id}/messages")
+def create_group_message(
+    group_id: UUID,
+    body: CreateGroupMessageRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_membership(db, group, user)
+    message = body.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    row = (
+        db.execute(
+            text(
+                """
+                INSERT INTO group_messages (group_id, sender_user_id, message)
+                VALUES (CAST(:gid AS uuid), CAST(:uid AS uuid), :message)
+                RETURNING id, sender_user_id, message, created_at
+                """
+            ),
+            {"gid": str(group_id), "uid": str(user.id), "message": message},
+        )
+        .mappings()
+        .one()
+    )
+    db.commit()
+    return {
+        "id": str(row["id"]),
+        "sender_user_id": str(row["sender_user_id"]),
+        "sender_name": profile_name(db, user.id),
+        "message": row["message"],
+        "created_at": row["created_at"],
+    }
 
 
 @app.get("/groups/{group_id}/membership-status")
