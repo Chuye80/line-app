@@ -143,9 +143,19 @@ button:disabled {
   gap: 8px;
 }
 
-.chevron {
-  font-size: 22px;
+.section-header .chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  font-size: 30px;
+  font-weight: 900;
   line-height: 1;
+  color: #000;
+  -webkit-text-fill-color: #000;
+  -webkit-text-stroke: 0.5px #000;
   transition: transform 0.15s ease;
 }
 
