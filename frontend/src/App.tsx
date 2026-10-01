@@ -173,6 +173,25 @@ type StatRow = Member & {
   mvp_titles: number;
 };
 
+type StatisticsTableRow = {
+  id: string;
+  name: string;
+  rating: number;
+  gameDays: number;
+  matches: number;
+  championships: number;
+  goals: number;
+  assists: number;
+  mvps: number;
+};
+
+type StatisticsTableColumn = {
+  key: string;
+  label: string;
+  value: (row: StatisticsTableRow) => string | number;
+  display?: (row: StatisticsTableRow) => string | number;
+};
+
 const RATING_STEPS = [1, 2, 3, 4, 5];
 
 function championSquads(champions: Member[]) {
@@ -182,6 +201,96 @@ function championSquads(champions: Member[]) {
     squads.set(team, [...(squads.get(team) ?? []), champion.name]);
   });
   return [...squads.values()];
+}
+
+function SortableStatisticsTable({
+  rows,
+  columns,
+  emptyText,
+}: {
+  rows: StatisticsTableRow[];
+  columns: StatisticsTableColumn[];
+  emptyText: string;
+}) {
+  const [sort, setSort] = useState<{
+    key: string;
+    direction: "asc" | "desc";
+  } | null>(null);
+
+  if (rows.length === 0) {
+    return <p className="muted-text">{emptyText}</p>;
+  }
+
+  const sortedRows = sort
+    ? [...rows].sort((left, right) => {
+        const column = columns.find((item) => item.key === sort.key);
+        if (!column) return 0;
+        const leftValue = column.value(left);
+        const rightValue = column.value(right);
+        const comparison =
+          typeof leftValue === "number" && typeof rightValue === "number"
+            ? leftValue - rightValue
+            : String(leftValue).localeCompare(String(rightValue));
+        return sort.direction === "asc" ? comparison : -comparison;
+      })
+    : rows;
+
+  return (
+    <div className="statistics-table-scroll">
+      <table className="statistics-table">
+        <thead>
+          <tr>
+            {columns.map((column) => {
+              const direction =
+                sort?.key === column.key ? sort.direction : null;
+              return (
+                <th
+                  key={column.key}
+                  aria-sort={
+                    direction
+                      ? direction === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
+                  }
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSort((current) => ({
+                        key: column.key,
+                        direction:
+                          current?.key === column.key &&
+                          current.direction === "asc"
+                            ? "desc"
+                            : "asc",
+                      }))
+                    }
+                  >
+                    {column.label}
+                    <span className="sort-indicator" aria-hidden="true">
+                      {direction ? (direction === "asc" ? "↑" : "↓") : ""}
+                    </span>
+                  </button>
+                </th>
+              );
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedRows.map((row) => (
+            <tr key={row.id}>
+              {columns.map((column) => (
+                <td key={column.key}>
+                  {column.display ? column.display(row) : column.value(row)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function StarRating({
@@ -1418,24 +1527,99 @@ function App() {
   const finishedGameDay = group?.finished_game_day ?? null;
   const teamNames = gameDay?.teams.map((team) => team.name) ?? [];
   const isLive = gameDay?.status === "live";
-  const dayStatsRows =
-    dayStats.length === 0 ? (
-      <p className="muted-text">{t("noDayStats")}</p>
-    ) : (
-      <div className="stats-table">
-        {dayStats.map((row) => (
-          <div className="member-row" key={row.member.id}>
-            <div>
-              <strong>{playerName(row.member)}</strong>
-              <div className="member-details">
-                {t("matchesPlayedLong")} {row.played} · {t("goals")} {row.goals} ·{" "}
-                {t("assists")} {row.assists}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
+  const dayStatisticsRows: StatisticsTableRow[] = dayStats.map((row) => ({
+    id: row.member.id,
+    name: playerName(row.member),
+    rating: row.member.rating,
+    gameDays: 0,
+    matches: row.played,
+    championships: 0,
+    goals: row.goals,
+    assists: row.assists,
+    mvps: 0,
+  }));
+  const overallStatisticsRows: StatisticsTableRow[] = stats.map((row) => ({
+    id: row.id,
+    name: row.name,
+    rating: row.rating,
+    gameDays: row.game_days_played,
+    matches: row.matches_played,
+    championships: row.championships,
+    goals: row.goals,
+    assists: row.assists,
+    mvps: row.mvp_titles,
+  }));
+  const goalsPerGame = (row: StatisticsTableRow) =>
+    row.matches === 0 ? 0 : row.goals / row.matches;
+  const assistsPerGame = (row: StatisticsTableRow) =>
+    row.matches === 0 ? 0 : row.assists / row.matches;
+  const rateColumns: StatisticsTableColumn[] = [
+    {
+      key: "name",
+      label: t("playerColumn"),
+      value: (row) => row.name,
+    },
+    {
+      key: "matches",
+      label: t("matchesPlayed"),
+      value: (row) => row.matches,
+    },
+    {
+      key: "goals",
+      label: t("goals"),
+      value: (row) => row.goals,
+    },
+    {
+      key: "goalsPerGame",
+      label: t("goalsPerGame"),
+      value: goalsPerGame,
+      display: (row) => goalsPerGame(row).toFixed(2),
+    },
+    {
+      key: "assists",
+      label: t("assists"),
+      value: (row) => row.assists,
+    },
+    {
+      key: "assistsPerGame",
+      label: t("assistsPerGame"),
+      value: assistsPerGame,
+      display: (row) => assistsPerGame(row).toFixed(2),
+    },
+  ];
+  const overallStatisticsColumns: StatisticsTableColumn[] = [
+    rateColumns[0]!,
+    {
+      key: "rating",
+      label: t("rating"),
+      value: (row) => row.rating,
+    },
+    {
+      key: "gameDays",
+      label: t("gameDaysPlayed"),
+      value: (row) => row.gameDays,
+    },
+    rateColumns[1]!,
+    {
+      key: "championships",
+      label: t("championships"),
+      value: (row) => row.championships,
+    },
+    ...rateColumns.slice(2),
+    {
+      key: "mvps",
+      label: t("mvps"),
+      value: (row) => row.mvps,
+    },
+  ];
+  const dayStatsRows = (
+    <SortableStatisticsTable
+      key="day"
+      rows={dayStatisticsRows}
+      columns={rateColumns}
+      emptyText={t("noDayStats")}
+    />
+  );
 
   return (
     <div className="app">
@@ -1941,23 +2125,12 @@ function App() {
               {statsScope === "day" ? (
                 dayStatsRows
               ) : (
-              <div className="stats-table">
-                {stats.map((row) => (
-                  <div className="member-row" key={row.id}>
-                    <div>
-                      <strong>{row.name}</strong>
-                      <div className="member-details">
-                        {t("rating")} {row.rating} · {t("gameDaysPlayed")}{" "}
-                        {row.game_days_played} · {t("matchesPlayed")}{" "}
-                        {row.matches_played} · {t("championships")}{" "}
-                        {row.championships} · {t("goals")} {row.goals} ·{" "}
-                        {t("assists")} {row.assists} · {t("mvpTitles")}{" "}
-                        {row.mvp_titles}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                <SortableStatisticsTable
+                  key="overall"
+                  rows={overallStatisticsRows}
+                  columns={overallStatisticsColumns}
+                  emptyText={t("noDayStats")}
+                />
               )}
             </section>
           )}
