@@ -1761,7 +1761,7 @@ function App() {
         <div>
           <h1>⚽ {t("appName")}</h1>
           <p>{session.user.email}</p>
-          <p className="muted-text">Version 1.0.0-beta.7</p>
+          <p className="muted-text">Version 1.0.0-beta.8</p>
         </div>
         <div className="header-actions">
           {languageToggle}
