@@ -1712,16 +1712,18 @@ def update_member(
         )
     if membership.is_admin and is_real(membership) and not request.is_admin:
         ensure_not_last_admin(db, membership)
+    updated_rating = Decimal(str(round(request.rating, 1)))
+    field_rating_changed = membership.rating != updated_rating
     if membership.user_id is None:
         membership.display_name = request.name.strip()
         membership.is_admin = False
     else:
         membership.is_admin = request.is_admin
-    membership.rating = Decimal(str(round(request.rating, 1)))
+    membership.rating = updated_rating
     membership.goalkeeper_rating = Decimal(str(round(request.goalkeeper_rating, 1)))
     membership.is_subscriber = request.is_subscriber
     game_day = current_game_day(db, group)
-    if game_day:
+    if game_day and field_rating_changed:
         clear_teams(db, game_day)
     db.commit()
     return membership_to_dict(db, membership)
@@ -1983,10 +1985,13 @@ def update_guest(
         raise HTTPException(status_code=404, detail="Guest not found")
     validate_guest_rating(request.rating)
     validate_guest_rating(request.goalkeeper_rating)
+    updated_rating = Decimal(str(request.rating))
+    field_rating_changed = guest.rating != updated_rating
     guest.display_name = guest_name(request.name)
-    guest.rating = Decimal(str(request.rating))
+    guest.rating = updated_rating
     guest.goalkeeper_rating = Decimal(str(request.goalkeeper_rating))
-    clear_teams(db, game_day)
+    if field_rating_changed:
+        clear_teams(db, game_day)
     db.commit()
     caller = membership_for_user(db, group.id, user.id)
     return slim_game_day_dict(db, game_day, caller)
