@@ -1508,6 +1508,16 @@ function App() {
 
   async function saveTeamAdjustments() {
     if (!group?.game_day) return;
+    const requiredSize = group.game_day.players_per_team;
+    const hasInvalidTeam = group.game_day.teams.some(
+      (team) =>
+        Object.values(teamDraft).filter((teamName) => teamName === team.name)
+          .length !== requiredSize
+    );
+    if (hasInvalidTeam) {
+      setError(`Each team must have ${requiredSize} players before saving.`);
+      return;
+    }
     await runAction(() =>
       apiFetch(`/groups/${group.id}/game-days/${group.game_day!.id}/teams`, {
         method: "PUT",
