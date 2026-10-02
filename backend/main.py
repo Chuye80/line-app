@@ -115,6 +115,7 @@ class CreateGameDayRequest(BaseModel):
 class CreateMemberRequest(BaseModel):
     name: str = Field(min_length=1)
     rating: float = Field(ge=1, le=5)
+    goalkeeper_rating: float = Field(default=3.0, ge=1, le=5)
     is_subscriber: bool = False
     is_admin: bool = False
 
@@ -122,6 +123,7 @@ class CreateMemberRequest(BaseModel):
 class UpdateMemberRequest(BaseModel):
     name: str = Field(min_length=1)
     rating: float = Field(ge=1, le=5)
+    goalkeeper_rating: float = Field(ge=1, le=5)
     is_subscriber: bool = False
     is_admin: bool = False
 
@@ -129,6 +131,7 @@ class UpdateMemberRequest(BaseModel):
 class GuestRequest(BaseModel):
     name: str = Field(min_length=1)
     rating: float = Field(ge=1, le=5)
+    goalkeeper_rating: float = Field(default=3.0, ge=1, le=5)
 
 
 class TransferAdminAndLeaveRequest(BaseModel):
@@ -172,8 +175,13 @@ class MvpVoteRequest(BaseModel):
     nominee_membership_id: UUID
 
 
+class SurveyRatingRequest(BaseModel):
+    rating: float = Field(ge=1, le=5)
+    goalkeeper_rating: float = Field(ge=1, le=5)
+
+
 class SurveyRatingsRequest(BaseModel):
-    ratings: dict[str, float]
+    ratings: dict[str, SurveyRatingRequest]
 
 
 _AUTH_CACHE: dict[str, tuple[float, CurrentUser]] = {}
@@ -516,6 +524,7 @@ def membership_to_dict(
         "user_id": str(membership.user_id) if membership.user_id else None,
         "name": membership_name(db, membership, cache),
         "rating": float(membership.rating),
+        "goalkeeper_rating": float(membership.goalkeeper_rating),
         "is_subscriber": bool(membership.is_subscriber),
         "is_admin": membership.is_admin,
         "is_virtual": membership.user_id is None and not is_guest,
@@ -1113,7 +1122,10 @@ def survey_to_dict(
     if viewer:
         for response in survey.responses:
             if response.rater_membership_id == viewer.id:
-                my_ratings[str(response.rated_membership_id)] = response.rating
+                my_ratings[str(response.rated_membership_id)] = {
+                    "rating": response.rating,
+                    "goalkeeper_rating": response.goalkeeper_rating,
+                }
     return {
         "id": str(survey.id),
         "status": survey.status,
@@ -1307,6 +1319,7 @@ def create_group(
             group_id=group.id,
             user_id=user.id,
             rating=Decimal("3.0"),
+            goalkeeper_rating=Decimal("3.0"),
             is_subscriber=False,
             is_admin=True,
         )
@@ -1532,6 +1545,7 @@ def approve_join_request(
                 group_id=group.id,
                 user_id=request.user_id,
                 rating=Decimal("3.0"),
+                goalkeeper_rating=Decimal("3.0"),
                 is_subscriber=False,
                 is_admin=False,
             )
@@ -1664,6 +1678,7 @@ def add_virtual_member(
         user_id=None,
         display_name=request.name.strip(),
         rating=Decimal(str(request.rating)),
+        goalkeeper_rating=Decimal(str(request.goalkeeper_rating)),
         is_subscriber=request.is_subscriber,
         is_admin=False,
     )
@@ -1703,6 +1718,7 @@ def update_member(
     else:
         membership.is_admin = request.is_admin
     membership.rating = Decimal(str(round(request.rating, 1)))
+    membership.goalkeeper_rating = Decimal(str(round(request.goalkeeper_rating, 1)))
     membership.is_subscriber = request.is_subscriber
     game_day = current_game_day(db, group)
     if game_day:
@@ -1920,11 +1936,13 @@ def create_guest(
     if participant_count_db(db, game_day.id) >= game_day.participant_count:
         raise HTTPException(status_code=400, detail="This Game Day is full")
     validate_guest_rating(request.rating)
+    validate_guest_rating(request.goalkeeper_rating)
     guest = Membership(
         group_id=group.id,
         game_day_id=game_day.id,
         display_name=guest_name(request.name),
         rating=Decimal(str(request.rating)),
+        goalkeeper_rating=Decimal(str(request.goalkeeper_rating)),
         is_subscriber=False,
         is_admin=False,
     )
@@ -1964,8 +1982,10 @@ def update_guest(
     if guest is None or guest.game_day_id != game_day.id:
         raise HTTPException(status_code=404, detail="Guest not found")
     validate_guest_rating(request.rating)
+    validate_guest_rating(request.goalkeeper_rating)
     guest.display_name = guest_name(request.name)
     guest.rating = Decimal(str(request.rating))
+    guest.goalkeeper_rating = Decimal(str(request.goalkeeper_rating))
     clear_teams(db, game_day)
     db.commit()
     caller = membership_for_user(db, group.id, user.id)
@@ -2401,7 +2421,7 @@ def submit_survey_ratings(
         raise HTTPException(status_code=404, detail="Survey not found")
     if survey.status != "open":
         raise HTTPException(status_code=400, detail="This survey is closed")
-    for key, value in request.ratings.items():
+    for key, values in request.ratings.items():
         try:
             rated_id = UUID(key)
         except ValueError as exc:
@@ -2425,14 +2445,13 @@ def submit_survey_ratings(
                 status_code=400,
                 detail="Virtual members cannot be rated",
             )
-        if value < 1 or value > 5:
-            raise HTTPException(status_code=400, detail="Ratings must be between 1 and 5")
-        # Half stars only: doubling a permitted value lands on a whole number.
-        if (value * 2) % 1 != 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Ratings must be given in steps of 0.5",
-            )
+        for value in (values.rating, values.goalkeeper_rating):
+            # Half stars only: doubling a permitted value lands on a whole number.
+            if (value * 2) % 1 != 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Ratings must be given in steps of 0.5",
+                )
         existing = (
             db.query(RatingSurveyResponse)
             .filter(
@@ -2443,14 +2462,16 @@ def submit_survey_ratings(
             .first()
         )
         if existing:
-            existing.rating = value
+            existing.rating = values.rating
+            existing.goalkeeper_rating = values.goalkeeper_rating
         else:
             db.add(
                 RatingSurveyResponse(
                     survey_id=survey.id,
                     rater_membership_id=membership.id,
                     rated_membership_id=rated_id,
-                    rating=value,
+                    rating=values.rating,
+                    goalkeeper_rating=values.goalkeeper_rating,
                 )
             )
     db.commit()
@@ -2472,16 +2493,26 @@ def close_survey(
         raise HTTPException(status_code=404, detail="Survey not found")
     if survey.status != "open":
         raise HTTPException(status_code=400, detail="Survey already closed")
-    totals: dict[UUID, list[Decimal]] = defaultdict(list)
+    field_totals: dict[UUID, list[Decimal]] = defaultdict(list)
+    goalkeeper_totals: dict[UUID, list[Decimal]] = defaultdict(list)
     for response in survey.responses:
-        totals[response.rated_membership_id].append(response.rating)
-    for membership_id, values in totals.items():
+        field_totals[response.rated_membership_id].append(response.rating)
+        goalkeeper_totals[response.rated_membership_id].append(
+            response.goalkeeper_rating
+        )
+    for membership_id, values in field_totals.items():
         membership = db.get(Membership, membership_id)
         if membership is None or not is_real(membership):
             continue
         average = sum(values) / len(values)
         rounded = Decimal(str(average)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
         membership.rating = rounded
+        goalkeeper_values = goalkeeper_totals[membership_id]
+        goalkeeper_average = sum(goalkeeper_values) / len(goalkeeper_values)
+        membership.goalkeeper_rating = Decimal(str(goalkeeper_average)).quantize(
+            Decimal("0.1"),
+            rounding=ROUND_HALF_UP,
+        )
     survey.status = "closed"
     survey.closed_at = now_utc()
     db.commit()

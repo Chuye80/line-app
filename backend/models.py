@@ -92,6 +92,11 @@ class Membership(Base):
     )
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     rating: Mapped[Decimal] = mapped_column(Numeric(3, 1), nullable=False, default=Decimal("3.0"))
+    goalkeeper_rating: Mapped[Decimal] = mapped_column(
+        Numeric(3, 1),
+        nullable=False,
+        default=Decimal("3.0"),
+    )
     is_subscriber: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = created_at_col()
@@ -356,6 +361,7 @@ class RatingSurveyResponse(Base):
         nullable=False,
     )
     rating: Mapped[Decimal] = mapped_column(Numeric(2, 1), nullable=False)
+    goalkeeper_rating: Mapped[Decimal] = mapped_column(Numeric(2, 1), nullable=False)
     created_at: Mapped[datetime] = created_at_col()
 
     survey: Mapped["RatingSurvey"] = relationship(back_populates="responses")

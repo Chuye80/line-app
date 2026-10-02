@@ -1136,6 +1136,24 @@ button:disabled {
   font-weight: 600;
 }
 
+.survey-ratings {
+  display: grid;
+  gap: 8px;
+}
+
+.survey-rating-field {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.survey-rating-field > span {
+  color: #6b7280;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 .star-rating {
   display: inline-flex;
   align-items: center;
@@ -1243,6 +1261,16 @@ button:disabled {
   .survey-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .survey-ratings {
+    width: 100%;
+  }
+
+  .survey-rating-field {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .star {

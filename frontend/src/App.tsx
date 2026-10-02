@@ -32,6 +32,7 @@ type Member = {
   user_id: string | null;
   name: string;
   rating: number;
+  goalkeeper_rating: number;
   is_subscriber: boolean;
   is_admin: boolean;
   is_virtual: boolean;
@@ -104,7 +105,12 @@ type GameDay = {
 type Survey = {
   id: string;
   status: "open" | "closed";
-  my_ratings: Record<string, number>;
+  my_ratings: Record<string, SurveyRating>;
+};
+
+type SurveyRating = {
+  rating: number;
+  goalkeeper_rating: number;
 };
 
 type Group = {
@@ -177,6 +183,7 @@ type StatisticsTableRow = {
   id: string;
   name: string;
   rating: number;
+  goalkeeperRating: number;
   gameDays: number;
   matches: number;
   championships: number;
@@ -418,12 +425,14 @@ function App() {
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [memberName, setMemberName] = useState("");
   const [memberRating, setMemberRating] = useState(3);
+  const [memberGoalkeeperRating, setMemberGoalkeeperRating] = useState(3);
   const [memberSubscriber, setMemberSubscriber] = useState(false);
   const [memberAdmin, setMemberAdmin] = useState(false);
   const [showGuestForm, setShowGuestForm] = useState(false);
   const [editingGuest, setEditingGuest] = useState<Member | null>(null);
   const [guestName, setGuestName] = useState("");
   const [guestRating, setGuestRating] = useState(3);
+  const [guestGoalkeeperRating, setGuestGoalkeeperRating] = useState(3);
   const [teamDraft, setTeamDraft] = useState<Record<string, string>>({});
   const [editingTeams, setEditingTeams] = useState(false);
 
@@ -440,7 +449,9 @@ function App() {
     Record<string, { scorer: string; assist: string }[]>
   >({});
   const [mvpChoice, setMvpChoice] = useState("");
-  const [surveyDraft, setSurveyDraft] = useState<Record<string, number>>({});
+  const [surveyDraft, setSurveyDraft] = useState<
+    Record<string, Partial<SurveyRating>>
+  >({});
   const [copied, setCopied] = useState(false);
   const [showGroupActions, setShowGroupActions] = useState(false);
   const [showExitOptions, setShowExitOptions] = useState(false);
@@ -494,8 +505,35 @@ function App() {
   const surveyEligibleMembers =
     group?.members.filter(
       (member) =>
-        !member.is_virtual && member.id !== currentMembership?.id
+        member.user_id !== null && member.id !== currentMembership?.id
     ) ?? [];
+  const surveyRatingValue = (
+    memberId: string,
+    key: keyof SurveyRating
+  ): number =>
+    surveyDraft[memberId]?.[key] ??
+    group?.survey?.my_ratings?.[memberId]?.[key] ??
+    0;
+  const completedSurveyRatings = Object.fromEntries(
+    surveyEligibleMembers.flatMap((member) => {
+      const rating = surveyRatingValue(member.id, "rating");
+      const goalkeeperRating = surveyRatingValue(
+        member.id,
+        "goalkeeper_rating"
+      );
+      return rating && goalkeeperRating
+        ? [
+            [
+              member.id,
+              {
+                rating,
+                goalkeeper_rating: goalkeeperRating,
+              },
+            ],
+          ]
+        : [];
+    })
+  );
 
   // Statistics for the single day being played or just finished. These are
   // read straight off that day's matches rather than kept alongside the
@@ -679,7 +717,7 @@ function App() {
       const value = data as {
         invite_code?: string;
         invite_link?: string;
-        my_ratings?: Record<string, number>;
+        my_ratings?: Record<string, SurveyRating>;
         status?: string;
         id?: string;
         name?: string;
@@ -1261,6 +1299,7 @@ function App() {
     setEditingMember(null);
     setMemberName("");
     setMemberRating(3);
+    setMemberGoalkeeperRating(3);
     setMemberSubscriber(false);
     setMemberAdmin(false);
     setShowMemberForm(false);
@@ -1270,6 +1309,7 @@ function App() {
     setEditingMember(member);
     setMemberName(member.name);
     setMemberRating(member.rating);
+    setMemberGoalkeeperRating(member.goalkeeper_rating);
     setMemberSubscriber(member.is_subscriber);
     setMemberAdmin(member.is_admin);
     setShowMemberForm(true);
@@ -1281,6 +1321,7 @@ function App() {
     const body = JSON.stringify({
       name: memberName.trim(),
       rating: memberRating,
+      goalkeeper_rating: memberGoalkeeperRating,
       is_subscriber: memberSubscriber,
       is_admin: memberAdmin,
     });
@@ -1308,6 +1349,7 @@ function App() {
     setEditingGuest(null);
     setGuestName("");
     setGuestRating(3);
+    setGuestGoalkeeperRating(3);
     setShowGuestForm(false);
   }
 
@@ -1315,6 +1357,7 @@ function App() {
     setEditingGuest(guest);
     setGuestName(guest.name);
     setGuestRating(guest.rating);
+    setGuestGoalkeeperRating(guest.goalkeeper_rating);
     setShowGuestForm(true);
   }
 
@@ -1331,6 +1374,7 @@ function App() {
         body: JSON.stringify({
           name: guestName.trim(),
           rating: guestRating,
+          goalkeeper_rating: guestGoalkeeperRating,
         }),
       })
     );
@@ -1350,6 +1394,12 @@ function App() {
 
   function playerName(player: Member) {
     return player.is_guest ? `${player.name} (${t("guest")})` : player.name;
+  }
+
+  function playerRatings(player: Member) {
+    return `${t("playerRating")} ${player.rating} · ${t("goalkeeperRating")} ${
+      player.goalkeeper_rating
+    }`;
   }
 
   function standingsTable(rows: Standing[]) {
@@ -1570,6 +1620,7 @@ function App() {
     id: row.member.id,
     name: playerName(row.member),
     rating: row.member.rating,
+    goalkeeperRating: row.member.goalkeeper_rating,
     gameDays: 0,
     matches: row.played,
     championships: 0,
@@ -1581,6 +1632,7 @@ function App() {
     id: row.id,
     name: row.name,
     rating: row.rating,
+    goalkeeperRating: row.goalkeeper_rating,
     gameDays: row.game_days_played,
     matches: row.matches_played,
     championships: row.championships,
@@ -1626,13 +1678,21 @@ function App() {
       display: (row) => assistsPerGame(row).toFixed(2),
     },
   ];
-  const overallStatisticsColumns: StatisticsTableColumn[] = [
-    rateColumns[0]!,
+  const ratingColumns: StatisticsTableColumn[] = [
     {
       key: "rating",
-      label: t("rating"),
+      label: t("playerRating"),
       value: (row) => row.rating,
     },
+    {
+      key: "goalkeeperRating",
+      label: t("goalkeeperRating"),
+      value: (row) => row.goalkeeperRating,
+    },
+  ];
+  const overallStatisticsColumns: StatisticsTableColumn[] = [
+    rateColumns[0]!,
+    ...ratingColumns,
     {
       key: "gameDays",
       label: t("gameDaysPlayed"),
@@ -1655,7 +1715,7 @@ function App() {
     <SortableStatisticsTable
       key="day"
       rows={dayStatisticsRows}
-      columns={rateColumns}
+      columns={[rateColumns[0]!, ...ratingColumns, ...rateColumns.slice(1)]}
       emptyText={t("noDayStats")}
     />
   );
@@ -2398,7 +2458,7 @@ function App() {
                                     />
                                   </label>
                                   <label>
-                                    {t("rating")}
+                                    {t("playerRating")}
                                     <input
                                       type="number"
                                       min={1}
@@ -2407,6 +2467,22 @@ function App() {
                                       value={guestRating}
                                       onChange={(event) =>
                                         setGuestRating(Number(event.target.value))
+                                      }
+                                      required
+                                    />
+                                  </label>
+                                  <label>
+                                    {t("goalkeeperRating")}
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={5}
+                                      step={0.5}
+                                      value={guestGoalkeeperRating}
+                                      onChange={(event) =>
+                                        setGuestGoalkeeperRating(
+                                          Number(event.target.value)
+                                        )
                                       }
                                       required
                                     />
@@ -2625,7 +2701,7 @@ function App() {
                         />
                       </label>
                       <label>
-                        {t("rating")}
+                        {t("playerRating")}
                         <input
                           type="number"
                           min={1}
@@ -2634,6 +2710,19 @@ function App() {
                           value={memberRating}
                           onChange={(event) =>
                             setMemberRating(Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        {t("goalkeeperRating")}
+                        <input
+                          type="number"
+                          min={1}
+                          max={5}
+                          step={0.1}
+                          value={memberGoalkeeperRating}
+                          onChange={(event) =>
+                            setMemberGoalkeeperRating(Number(event.target.value))
                           }
                         />
                       </label>
@@ -2691,7 +2780,8 @@ function App() {
                         <div className="member-main">
                           <strong>{member.name}</strong>
                           <div className="member-details">
-                            {t("rating")} {member.rating}
+                            {t("playerRating")} {member.rating} ·{" "}
+                            {t("goalkeeperRating")} {member.goalkeeper_rating}
                             {member.is_subscriber && ` · ${t("subscriber")}`}
                             {member.is_admin && ` · ${t("admin")}`}
                             {member.is_virtual && ` · ${t("virtual")}`}
@@ -2908,7 +2998,7 @@ function App() {
                           editingTeams ? (
                             <div className="team-player-edit-row" key={player.id}>
                               <span>
-                                {playerName(player)} ({player.rating})
+                                {playerName(player)} ({playerRatings(player)})
                               </span>
                               <select
                                 value={teamDraft[player.id] ?? ""}
@@ -2929,7 +3019,7 @@ function App() {
                             </div>
                           ) : (
                             <p key={player.id}>
-                              {playerName(player)} ({player.rating})
+                              {playerName(player)} ({playerRatings(player)})
                             </p>
                           )
                         )}
@@ -2949,7 +3039,7 @@ function App() {
                           editingTeams ? (
                             <div className="team-player-edit-row" key={player.id}>
                               <span>
-                                {playerName(player)} ({player.rating})
+                                {playerName(player)} ({playerRatings(player)})
                               </span>
                               <select
                                 value={teamDraft[player.id] ?? ""}
@@ -2970,7 +3060,7 @@ function App() {
                             </div>
                           ) : (
                             <p key={player.id}>
-                              {playerName(player)} ({player.rating})
+                              {playerName(player)} ({playerRatings(player)})
                             </p>
                           )
                         )}
@@ -3406,22 +3496,45 @@ function App() {
                         {surveyEligibleMembers.map((member) => (
                           <div className="survey-row" key={member.id}>
                             <span className="survey-name">{member.name}</span>
-                            <StarRating
-                              label={member.name}
-                              // Fall back to what was already submitted, so
-                              // reopening the survey is an edit, not a reset.
-                              value={
-                                surveyDraft[member.id] ??
-                                group.survey?.my_ratings?.[member.id] ??
-                                0
-                              }
-                              onChange={(value) =>
-                                setSurveyDraft((previous) => ({
-                                  ...previous,
-                                  [member.id]: value,
-                                }))
-                              }
-                            />
+                            <div className="survey-ratings">
+                              <div className="survey-rating-field">
+                                <span>{t("playerRating")}</span>
+                                <StarRating
+                                  label={`${member.name} ${t("playerRating")}`}
+                                  // Fall back to what was already submitted, so
+                                  // reopening the survey is an edit, not a reset.
+                                  value={surveyRatingValue(member.id, "rating")}
+                                  onChange={(value) =>
+                                    setSurveyDraft((previous) => ({
+                                      ...previous,
+                                      [member.id]: {
+                                        ...previous[member.id],
+                                        rating: value,
+                                      },
+                                    }))
+                                  }
+                                />
+                              </div>
+                              <div className="survey-rating-field">
+                                <span>{t("goalkeeperRating")}</span>
+                                <StarRating
+                                  label={`${member.name} ${t("goalkeeperRating")}`}
+                                  value={surveyRatingValue(
+                                    member.id,
+                                    "goalkeeper_rating"
+                                  )}
+                                  onChange={(value) =>
+                                    setSurveyDraft((previous) => ({
+                                      ...previous,
+                                      [member.id]: {
+                                        ...previous[member.id],
+                                        goalkeeper_rating: value,
+                                      },
+                                    }))
+                                  }
+                                />
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -3437,7 +3550,9 @@ function App() {
                                 {
                                   method: "POST",
                                   headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ ratings: surveyDraft }),
+                                  body: JSON.stringify({
+                                    ratings: completedSurveyRatings,
+                                  }),
                                 }
                               )
                             )
