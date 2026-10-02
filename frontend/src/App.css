@@ -449,6 +449,59 @@ button:disabled {
   background: #f9fafb;
 }
 
+.standings-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #dbe1e8;
+  border-radius: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.standings-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.standings-table th,
+.standings-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #dbe1e8;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.standings-table th {
+  background: #f3f6f8;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.standings-table tbody tr:nth-child(even) {
+  background: #f9fafb;
+}
+
+.standings-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.standings-table .standings-position,
+.standings-table .standings-points {
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.standings-table .standings-team {
+  min-width: 130px;
+  text-align: start;
+  font-weight: 700;
+  color: #111827;
+}
+
 .member-actions {
   display: flex;
   align-items: center;
@@ -942,15 +995,9 @@ button:disabled {
   color: #7a5b12;
 }
 
-.celebration-card .standings-list {
-  margin: 4px auto 0;
-  padding-top: 12px;
-  border-top: 1px solid #f0e2b8;
-  max-width: 420px;
-}
-
-.celebration-card .standings-list p {
-  margin: 4px 0;
+.celebration-card .standings-table-scroll {
+  margin-top: 12px;
+  border-color: #f0e2b8;
 }
 
 @keyframes trophy-pop {

@@ -1352,6 +1352,45 @@ function App() {
     return player.is_guest ? `${player.name} (${t("guest")})` : player.name;
   }
 
+  function standingsTable(rows: Standing[]) {
+    return (
+      <div className="standings-table-scroll">
+        <table className="standings-table">
+          <thead>
+            <tr>
+              <th>{t("position")}</th>
+              <th>{t("team")}</th>
+              <th>{t("played")}</th>
+              <th>{t("wins")}</th>
+              <th>{t("draws")}</th>
+              <th>{t("losses")}</th>
+              <th>{t("goalsForAgainst")}</th>
+              <th>{t("gd")}</th>
+              <th>{t("pts")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={row.name}>
+                <td className="standings-position">{index + 1}</td>
+                <td className="standings-team">{row.name}</td>
+                <td>{row.played}</td>
+                <td>{row.wins}</td>
+                <td>{row.draws}</td>
+                <td>{row.losses}</td>
+                <td>
+                  {row.goals_for} / {row.goals_against}
+                </td>
+                <td>{row.goal_difference}</td>
+                <td className="standings-points">{row.points}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   async function leaveGroup() {
     if (!group) return;
     await runAction(
@@ -3242,14 +3281,7 @@ function App() {
                   }
                 >
                   <h2>{t("standings")}</h2>
-                  {gameDay.standings.map((row) => (
-                    <p key={row.name}>
-                      {row.name}: {row.points} {t("pts")} · {row.wins}
-                      {t("wins")} {row.draws}
-                      {t("draws")} {row.losses}
-                      {t("losses")} · {t("gd")} {row.goal_difference}
-                    </p>
-                  ))}
+                  {standingsTable(gameDay.standings)}
                 </section>
               )}
 
@@ -3277,16 +3309,7 @@ function App() {
                       </>
                     )}
                   {finishedGameDay.standings.length > 0 && (
-                    <div className="standings-list">
-                      {finishedGameDay.standings.map((row) => (
-                        <p key={row.name}>
-                          {row.name}: {row.points} {t("pts")} · {row.wins}
-                          {t("wins")} {row.draws}
-                          {t("draws")} {row.losses}
-                          {t("losses")} · {t("gd")} {row.goal_difference}
-                        </p>
-                      ))}
-                    </div>
+                    standingsTable(finishedGameDay.standings)
                   )}
                   {finishedGameDay.mvp_announced ? (
                     <p>
