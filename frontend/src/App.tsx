@@ -435,6 +435,7 @@ function App() {
   const [guestGoalkeeperRating, setGuestGoalkeeperRating] = useState(3);
   const [teamDraft, setTeamDraft] = useState<Record<string, string>>({});
   const [editingTeams, setEditingTeams] = useState(false);
+  const [teamAdjustmentError, setTeamAdjustmentError] = useState("");
 
   const [gameDate, setGameDate] = useState("");
   const [gameTime, setGameTime] = useState("20:00");
@@ -1506,16 +1507,38 @@ function App() {
     return t("statusUpcoming");
   }
 
+  function draftTeamSize(
+    teamName: string,
+    draft: Record<string, string> = teamDraft
+  ) {
+    return Object.values(draft).filter((value) => value === teamName).length;
+  }
+
+  function updateTeamDraft(membershipId: string, teamName: string) {
+    const updatedDraft = { ...teamDraft, [membershipId]: teamName };
+    setTeamDraft(updatedDraft);
+    const gameDay = group?.game_day;
+    if (
+      gameDay &&
+      gameDay.teams.every(
+        (team) =>
+          draftTeamSize(team.name, updatedDraft) === gameDay.players_per_team
+      )
+    ) {
+      setTeamAdjustmentError("");
+    }
+  }
+
   async function saveTeamAdjustments() {
     if (!group?.game_day) return;
     const requiredSize = group.game_day.players_per_team;
     const hasInvalidTeam = group.game_day.teams.some(
-      (team) =>
-        Object.values(teamDraft).filter((teamName) => teamName === team.name)
-          .length !== requiredSize
+      (team) => draftTeamSize(team.name) !== requiredSize
     );
     if (hasInvalidTeam) {
-      setError(`Each team must have ${requiredSize} players before saving.`);
+      setTeamAdjustmentError(
+        `Each team must have exactly ${requiredSize} players.`
+      );
       return;
     }
     await runAction(() =>
@@ -1532,6 +1555,7 @@ function App() {
         }),
       })
     );
+    setTeamAdjustmentError("");
     setEditingTeams(false);
   }
 
@@ -2969,7 +2993,10 @@ function App() {
                       {!editingTeams ? (
                         <button
                           className="secondary-button"
-                          onClick={() => setEditingTeams(true)}
+                          onClick={() => {
+                            setTeamAdjustmentError("");
+                            setEditingTeams(true);
+                          }}
                         >
                           {t("adjustTeams")}
                         </button>
@@ -2983,11 +3010,19 @@ function App() {
                           </button>
                           <button
                             className="secondary-button"
-                            onClick={() => setEditingTeams(false)}
+                            onClick={() => {
+                              setTeamAdjustmentError("");
+                              setEditingTeams(false);
+                            }}
                           >
                             {t("cancel")}
                           </button>
                         </>
+                      )}
+                      {teamAdjustmentError && (
+                        <div className="error-box team-adjustment-error">
+                          {teamAdjustmentError}
+                        </div>
                       )}
                     </div>
                   )}
@@ -2996,8 +3031,19 @@ function App() {
                       <div className="team-box" key={team.name}>
                         <div className="team-header">
                           <h3>{team.name}</h3>
-                          <span>
-                            {team.players.length}/{gameDay.players_per_team}
+                          <span
+                            className={
+                              editingTeams &&
+                              draftTeamSize(team.name) !==
+                                gameDay.players_per_team
+                                ? "invalid-team-count"
+                                : undefined
+                            }
+                          >
+                            {editingTeams
+                              ? draftTeamSize(team.name)
+                              : team.players.length}
+                            /{gameDay.players_per_team}
                           </span>
                         </div>
                         {(editingTeams
@@ -3014,10 +3060,7 @@ function App() {
                               <select
                                 value={teamDraft[player.id] ?? ""}
                                 onChange={(event) =>
-                                  setTeamDraft((previous) => ({
-                                    ...previous,
-                                    [player.id]: event.target.value,
-                                  }))
+                                  updateTeamDraft(player.id, event.target.value)
                                 }
                               >
                                 <option value="">{t("unassigned")}</option>
@@ -3055,10 +3098,7 @@ function App() {
                               <select
                                 value={teamDraft[player.id] ?? ""}
                                 onChange={(event) =>
-                                  setTeamDraft((previous) => ({
-                                    ...previous,
-                                    [player.id]: event.target.value,
-                                  }))
+                                  updateTeamDraft(player.id, event.target.value)
                                 }
                               >
                                 <option value="">{t("unassigned")}</option>

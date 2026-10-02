@@ -546,6 +546,11 @@ button:disabled {
   font-size: 13px;
 }
 
+.team-header .invalid-team-count {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
 @media (max-width: 900px) {
   .page-layout {
     display: block;
@@ -783,6 +788,11 @@ button:disabled {
   gap: 10px;
   flex-wrap: wrap;
   margin-top: 14px;
+}
+
+.team-adjustment-error {
+  width: 100%;
+  margin-bottom: 0;
 }
 
 .team-count-summary {
