@@ -758,6 +758,33 @@ def read_group_payload(group_id: UUID, user_id: UUID) -> dict:
             status_code=403,
             detail="You are not a member of this group",
         )
+    survey = payload.get("survey")
+    if survey:
+        survey["my_ratings"] = fetch_json(
+            """
+            SELECT coalesce(
+              jsonb_object_agg(
+                r.rated_membership_id::text,
+                jsonb_build_object(
+                  'rating', r.rating,
+                  'goalkeeper_rating', r.goalkeeper_rating
+                )
+              ),
+              '{}'::jsonb
+            )
+            FROM rating_survey_responses r
+            JOIN memberships viewer
+              ON viewer.id = r.rater_membership_id
+             AND viewer.group_id = CAST(:gid AS uuid)
+             AND viewer.user_id = CAST(:uid AS uuid)
+            WHERE r.survey_id = CAST(:sid AS uuid)
+            """,
+            {
+                "gid": str(group_id),
+                "uid": str(user_id),
+                "sid": survey["id"],
+            },
+        )
     payload["members"] = [
         member for member in payload.get("members", []) if not member.get("is_guest")
     ]
