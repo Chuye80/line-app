@@ -1141,6 +1141,7 @@ function App() {
       setEditingTeams(false);
       return;
     }
+    if (editingTeams) return;
     const draft: Record<string, string> = {};
     group.game_day.teams.forEach((team) => {
       team.players.forEach((player) => {
@@ -1151,7 +1152,7 @@ function App() {
       draft[player.id] = "";
     });
     setTeamDraft(draft);
-  }, [group?.game_day?.teams, group?.game_day?.unassigned]);
+  }, [group?.game_day?.teams, group?.game_day?.unassigned, editingTeams]);
 
   useEffect(() => {
     if (liveWorkspace && group?.game_day?.status !== "live") {
