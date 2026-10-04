@@ -161,13 +161,12 @@ class CreateMatchRequest(BaseModel):
 
 
 class CompleteMatchRequest(BaseModel):
-    home_score: int = Field(ge=0)
-    away_score: int = Field(ge=0)
     goals: list["GoalItem"] = []
 
 
 class GoalItem(BaseModel):
-    scorer_membership_id: UUID
+    team_name: str = Field(min_length=1)
+    scorer_membership_id: UUID | None = None
     assist_membership_id: UUID | None = None
 
 
@@ -895,6 +894,26 @@ def announce_mvp(db: Session, game_day: GameDay, votes: list[MvpVote] | None = N
     db.commit()
 
 
+def scores_from_goal_teams(
+    home_team_name: str,
+    away_team_name: str,
+    goals: list[GoalItem],
+) -> tuple[int, int]:
+    home_score = 0
+    away_score = 0
+    for goal in goals:
+        if goal.team_name == home_team_name:
+            home_score += 1
+        elif goal.team_name == away_team_name:
+            away_score += 1
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Each goal must belong to one of the match teams",
+            )
+    return home_score, away_score
+
+
 def match_to_dict(db: Session, match: Match) -> dict:
     return {
         "id": str(match.id),
@@ -913,8 +932,13 @@ def match_to_dict(db: Session, match: Match) -> dict:
         "goals": [
             {
                 "id": str(goal.id),
-                "scorer": membership_to_dict(db, goal.scorer),
-                "assist": membership_to_dict(db, goal.assister) if goal.assister else None,
+                "team_name": goal.team_name,
+                "scorer": (
+                    membership_to_dict(db, goal.scorer) if goal.scorer else None
+                ),
+                "assist": (
+                    membership_to_dict(db, goal.assister) if goal.assister else None
+                ),
             }
             for goal in match.goals
         ],
@@ -2193,26 +2217,59 @@ def complete_match(
     game_day = db.get(GameDay, match.game_day_id)
     if game_day is None or game_day.group_id != group.id:
         raise HTTPException(status_code=404, detail="Match not found")
+    game_day = sync_game_day_status(db, game_day)
+    if game_day.status != "live":
+        raise HTTPException(
+            status_code=400,
+            detail="Matches can only be saved during a Live Game Day",
+        )
     if match.status == "completed":
         for goal in list(match.goals):
             db.delete(goal)
-    playing_ids = {item.membership_id for item in match.players}
+    players_by_team: dict[str, set[UUID]] = defaultdict(set)
+    for item in match.players:
+        players_by_team[item.team_name].add(item.membership_id)
     for goal in request.goals:
-        if goal.scorer_membership_id not in playing_ids:
-            raise HTTPException(status_code=400, detail="Scorer must be playing in this match")
-        if goal.assist_membership_id and goal.assist_membership_id not in playing_ids:
-            raise HTTPException(status_code=400, detail="Assist must come from a player in this match")
-        if goal.assist_membership_id == goal.scorer_membership_id:
-            raise HTTPException(status_code=400, detail="A player cannot assist their own goal")
+        team_players = players_by_team.get(goal.team_name)
+        if not team_players:
+            raise HTTPException(
+                status_code=400,
+                detail="Each goal must belong to one of the match teams",
+            )
+        if goal.scorer_membership_id and goal.scorer_membership_id not in team_players:
+            raise HTTPException(
+                status_code=400,
+                detail="Scorer must belong to the scoring team",
+            )
+        if goal.assist_membership_id and goal.assist_membership_id not in team_players:
+            raise HTTPException(
+                status_code=400,
+                detail="Assist must come from the scoring team",
+            )
+        if (
+            goal.scorer_membership_id
+            and goal.assist_membership_id
+            and goal.assist_membership_id == goal.scorer_membership_id
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="A player cannot assist their own goal",
+            )
         db.add(
             MatchGoal(
                 match_id=match.id,
+                team_name=goal.team_name,
                 scorer_membership_id=goal.scorer_membership_id,
                 assist_membership_id=goal.assist_membership_id,
             )
         )
-    match.home_score = request.home_score
-    match.away_score = request.away_score
+    home_score, away_score = scores_from_goal_teams(
+        match.home_team_name,
+        match.away_team_name,
+        request.goals,
+    )
+    match.home_score = home_score
+    match.away_score = away_score
     match.status = "completed"
     match.completed_at = now_utc()
     db.commit()

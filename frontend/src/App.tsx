@@ -49,9 +49,48 @@ type Team = {
 
 type MatchGoal = {
   id: string;
-  scorer: Member;
+  team_name: string;
+  scorer: Member | null;
   assist: Member | null;
 };
+
+type GoalDraft = {
+  team: string;
+  scorer: string;
+  assist: string;
+};
+
+function scoreFromGoalDrafts(
+  goals: GoalDraft[],
+  homeTeam: string,
+  awayTeam: string
+): { home: number; away: number } {
+  let home = 0;
+  let away = 0;
+  for (const goal of goals) {
+    if (goal.team === homeTeam) home += 1;
+    else if (goal.team === awayTeam) away += 1;
+  }
+  return { home, away };
+}
+
+function goalDraftsFromMatch(goals: MatchGoal[]): GoalDraft[] {
+  return goals.map((goal) => ({
+    team: goal.team_name,
+    scorer: goal.scorer?.id ?? "",
+    assist: goal.assist?.id ?? "",
+  }));
+}
+
+function buildCompleteGoalsPayload(goals: GoalDraft[]) {
+  return goals
+    .filter((goal) => goal.team)
+    .map((goal) => ({
+      team_name: goal.team,
+      scorer_membership_id: goal.scorer || null,
+      assist_membership_id: goal.assist || null,
+    }));
+}
 
 type MatchInfo = {
   id: string;
@@ -445,10 +484,8 @@ function App() {
 
   const [homeTeam, setHomeTeam] = useState("");
   const [awayTeam, setAwayTeam] = useState("");
-  const [matchScores, setMatchScores] = useState<Record<string, { home: string; away: string }>>({});
-  const [goalDrafts, setGoalDrafts] = useState<
-    Record<string, { scorer: string; assist: string }[]>
-  >({});
+  const [goalDrafts, setGoalDrafts] = useState<Record<string, GoalDraft[]>>({});
+  const [editingMatches, setEditingMatches] = useState<Set<string>>(() => new Set());
   const [mvpChoice, setMvpChoice] = useState("");
   const [surveyDraft, setSurveyDraft] = useState<
     Record<string, Partial<SurveyRating>>
@@ -561,7 +598,7 @@ function App() {
         });
       }
       match.goals.forEach((goal) => {
-        rowFor(goal.scorer).goals += 1;
+        if (goal.scorer) rowFor(goal.scorer).goals += 1;
         if (goal.assist) rowFor(goal.assist).assists += 1;
       });
     });
@@ -3180,230 +3217,256 @@ function App() {
                     </div>
                   )}
                   {gameDay.matches.map((match) => {
-                    const scores = matchScores[match.id] ?? {
-                      home: String(match.home_score ?? 0),
-                      away: String(match.away_score ?? 0),
-                    };
-                    const goals = goalDrafts[match.id] ?? [];
+                    const isEditing = editingMatches.has(match.id);
+                    const isEditable =
+                      isAdmin &&
+                      isLive &&
+                      (match.status !== "completed" || isEditing);
+                    const showReadOnlyResult =
+                      match.status === "completed" && !isEditing;
+                    const drafts = isEditable ? (goalDrafts[match.id] ?? []) : [];
+                    const displayScore = showReadOnlyResult
+                      ? {
+                          home: match.home_score ?? 0,
+                          away: match.away_score ?? 0,
+                        }
+                      : scoreFromGoalDrafts(
+                          drafts,
+                          match.home_team_name,
+                          match.away_team_name
+                        );
+                    const saveMatch = () =>
+                      runAction(async () => {
+                        await apiFetch(
+                          `/groups/${group.id}/matches/${match.id}/complete`,
+                          {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              goals: buildCompleteGoalsPayload(drafts),
+                            }),
+                          }
+                        );
+                        setGoalDrafts((previous) => {
+                          const next = { ...previous };
+                          delete next[match.id];
+                          return next;
+                        });
+                        setEditingMatches((previous) => {
+                          const next = new Set(previous);
+                          next.delete(match.id);
+                          return next;
+                        });
+                      });
                     return (
                       <div className="team-box" key={match.id}>
                         <h3>
                           {match.home_team_name} vs {match.away_team_name}
                         </h3>
-                        {match.status === "completed" ? (
-                          <p>
-                            {match.home_score} - {match.away_score}
-                          </p>
-                        ) : (
-                          isAdmin && (
-                            <>
-                              <div className="form-row">
-                                <label>
-                                  {t("homeScore")}
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    value={scores.home}
-                                    onChange={(event) =>
-                                      setMatchScores((previous) => ({
-                                        ...previous,
-                                        [match.id]: {
-                                          ...scores,
-                                          home: event.target.value,
-                                        },
-                                      }))
-                                    }
-                                  />
-                                </label>
-                                <label>
-                                  {t("awayScore")}
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    value={scores.away}
-                                    onChange={(event) =>
-                                      setMatchScores((previous) => ({
-                                        ...previous,
-                                        [match.id]: {
-                                          ...scores,
-                                          away: event.target.value,
-                                        },
-                                      }))
-                                    }
-                                  />
-                                </label>
-                              </div>
-                              {goals.map((goal, index) => {
-                                const scorer =
-                                  match.players.find(
-                                    (player) => player.id === goal.scorer
-                                  ) ?? null;
-                                // An assist can only come from a team-mate in
-                                // the same match, which is also the only thing
-                                // the server will accept.
-                                const assistOptions = scorer
-                                  ? match.players.filter(
-                                      (player) =>
-                                        player.team_name === scorer.team_name &&
-                                        player.id !== scorer.id
-                                    )
-                                  : [];
-                                return (
-                                  <div className="form-row goal-row" key={index}>
-                                    <label>
-                                      {t("scorer")}
-                                      <select
-                                        value={goal.scorer}
-                                        onChange={(event) =>
-                                          setGoalDrafts((previous) => {
-                                            const next = [
-                                              ...(previous[match.id] ?? []),
-                                            ];
-                                            const picked = event.target.value;
-                                            const stillOnSameTeam =
-                                              match.players.find(
-                                                (player) =>
-                                                  player.id === goal.assist
-                                              )?.team_name ===
-                                              match.players.find(
-                                                (player) => player.id === picked
-                                              )?.team_name;
-                                            next[index] = {
-                                              scorer: picked,
-                                              assist: stillOnSameTeam
-                                                ? goal.assist
-                                                : "",
-                                            };
-                                            return {
-                                              ...previous,
-                                              [match.id]: next,
-                                            };
-                                          })
-                                        }
-                                      >
-                                        <option value="">—</option>
-                                        {[
-                                          match.home_team_name,
-                                          match.away_team_name,
-                                        ].map((teamName) => (
-                                          <optgroup key={teamName} label={teamName}>
-                                            {match.players
-                                              .filter(
-                                                (player) =>
-                                                  player.team_name === teamName
-                                              )
-                                              .map((player) => (
-                                                <option
-                                                  key={player.id}
-                                                  value={player.id}
-                                                >
-                                                  {playerName(player)}
-                                                </option>
-                                              ))}
-                                          </optgroup>
-                                        ))}
-                                      </select>
-                                    </label>
-                                    <label>
-                                      {t("assist")}
-                                      <select
-                                        value={goal.assist}
-                                        disabled={!scorer}
-                                        onChange={(event) =>
-                                          setGoalDrafts((previous) => {
-                                            const next = [
-                                              ...(previous[match.id] ?? []),
-                                            ];
-                                            next[index] = {
-                                              ...goal,
-                                              assist: event.target.value,
-                                            };
-                                            return {
-                                              ...previous,
-                                              [match.id]: next,
-                                            };
-                                          })
-                                        }
-                                      >
-                                        <option value="">{t("noAssist")}</option>
-                                        {assistOptions.map((player) => (
-                                          <option key={player.id} value={player.id}>
-                                            {playerName(player)}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-                                    <button
-                                      className="text-danger-button"
-                                      type="button"
-                                      onClick={() =>
-                                        setGoalDrafts((previous) => ({
-                                          ...previous,
-                                          [match.id]: (
-                                            previous[match.id] ?? []
-                                          ).filter((_, at) => at !== index),
-                                        }))
+                        <p className="match-score">
+                          {displayScore.home} - {displayScore.away}
+                        </p>
+                        {showReadOnlyResult && (
+                          <>
+                            {isAdmin && (
+                              <button
+                                className="secondary-button"
+                                type="button"
+                                onClick={() => {
+                                  setGoalDrafts((previous) => ({
+                                    ...previous,
+                                    [match.id]: goalDraftsFromMatch(match.goals),
+                                  }));
+                                  setEditingMatches(
+                                    (previous) => new Set([...previous, match.id])
+                                  );
+                                }}
+                              >
+                                {t("editMatch")}
+                              </button>
+                            )}
+                            {match.goals.map((goal) => (
+                              <p key={goal.id}>
+                                {goal.team_name}:{" "}
+                                {goal.scorer
+                                  ? playerName(goal.scorer)
+                                  : t("unknownScorer")}
+                                {goal.assist
+                                  ? ` (${playerName(goal.assist)})`
+                                  : ""}
+                              </p>
+                            ))}
+                          </>
+                        )}
+                        {isEditable && (
+                          <>
+                            {drafts.map((goal, index) => {
+                              const teamPlayers = goal.team
+                                ? match.players.filter(
+                                    (player) => player.team_name === goal.team
+                                  )
+                                : [];
+                              const assistOptions = teamPlayers.filter(
+                                (player) => player.id !== goal.scorer
+                              );
+                              return (
+                                <div className="form-row goal-row" key={index}>
+                                  <label>
+                                    {t("scoringTeam")}
+                                    <select
+                                      value={goal.team}
+                                      onChange={(event) =>
+                                        setGoalDrafts((previous) => {
+                                          const next = [
+                                            ...(previous[match.id] ?? []),
+                                          ];
+                                          next[index] = {
+                                            team: event.target.value,
+                                            scorer: "",
+                                            assist: "",
+                                          };
+                                          return {
+                                            ...previous,
+                                            [match.id]: next,
+                                          };
+                                        })
                                       }
                                     >
-                                      {t("removeGoal")}
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                              <div className="form-actions">
+                                      <option value="">—</option>
+                                      <option value={match.home_team_name}>
+                                        {match.home_team_name}
+                                      </option>
+                                      <option value={match.away_team_name}>
+                                        {match.away_team_name}
+                                      </option>
+                                    </select>
+                                  </label>
+                                  <label>
+                                    {t("scorer")}
+                                    <select
+                                      value={goal.scorer}
+                                      disabled={!goal.team}
+                                      onChange={(event) =>
+                                        setGoalDrafts((previous) => {
+                                          const next = [
+                                            ...(previous[match.id] ?? []),
+                                          ];
+                                          const picked = event.target.value;
+                                          next[index] = {
+                                            ...goal,
+                                            scorer: picked,
+                                            assist:
+                                              picked && goal.assist === picked
+                                                ? ""
+                                                : goal.assist,
+                                          };
+                                          return {
+                                            ...previous,
+                                            [match.id]: next,
+                                          };
+                                        })
+                                      }
+                                    >
+                                      <option value="">{t("noScorer")}</option>
+                                      {teamPlayers.map((player) => (
+                                        <option key={player.id} value={player.id}>
+                                          {playerName(player)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label>
+                                    {t("assist")}
+                                    <select
+                                      value={goal.assist}
+                                      disabled={!goal.team}
+                                      onChange={(event) =>
+                                        setGoalDrafts((previous) => {
+                                          const next = [
+                                            ...(previous[match.id] ?? []),
+                                          ];
+                                          next[index] = {
+                                            ...goal,
+                                            assist: event.target.value,
+                                          };
+                                          return {
+                                            ...previous,
+                                            [match.id]: next,
+                                          };
+                                        })
+                                      }
+                                    >
+                                      <option value="">{t("noAssist")}</option>
+                                      {assistOptions.map((player) => (
+                                        <option key={player.id} value={player.id}>
+                                          {playerName(player)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <button
+                                    className="text-danger-button"
+                                    type="button"
+                                    onClick={() =>
+                                      setGoalDrafts((previous) => ({
+                                        ...previous,
+                                        [match.id]: (
+                                          previous[match.id] ?? []
+                                        ).filter((_, at) => at !== index),
+                                      }))
+                                    }
+                                  >
+                                    {t("removeGoal")}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                            <div className="form-actions">
+                              <button
+                                className="secondary-button"
+                                type="button"
+                                onClick={() =>
+                                  setGoalDrafts((previous) => ({
+                                    ...previous,
+                                    [match.id]: [
+                                      ...(previous[match.id] ?? []),
+                                      { team: "", scorer: "", assist: "" },
+                                    ],
+                                  }))
+                                }
+                              >
+                                {t("addGoal")}
+                              </button>
+                              {isEditing && (
                                 <button
                                   className="secondary-button"
                                   type="button"
-                                  onClick={() =>
-                                    setGoalDrafts((previous) => ({
-                                      ...previous,
-                                      [match.id]: [
-                                        ...(previous[match.id] ?? []),
-                                        { scorer: "", assist: "" },
-                                      ],
-                                    }))
-                                  }
+                                  onClick={() => {
+                                    setGoalDrafts((previous) => {
+                                      const next = { ...previous };
+                                      delete next[match.id];
+                                      return next;
+                                    });
+                                    setEditingMatches((previous) => {
+                                      const next = new Set(previous);
+                                      next.delete(match.id);
+                                      return next;
+                                    });
+                                  }}
                                 >
-                                  {t("addGoal")}
+                                  {t("cancelEdit")}
                                 </button>
-                                <button
-                                  className="primary-button"
-                                  onClick={() =>
-                                    runAction(() =>
-                                      apiFetch(
-                                        `/groups/${group.id}/matches/${match.id}/complete`,
-                                        {
-                                          method: "POST",
-                                          headers: {
-                                            "Content-Type": "application/json",
-                                          },
-                                          body: JSON.stringify({
-                                            home_score: Number(scores.home),
-                                            away_score: Number(scores.away),
-                                            goals: goals
-                                              .filter((goal) => goal.scorer)
-                                              .map((goal) => ({
-                                                scorer_membership_id: goal.scorer,
-                                                assist_membership_id: goal.assist || null,
-                                              })),
-                                          }),
-                                        }
-                                      )
-                                    )
-                                  }
-                                >
-                                  {t("completeMatch")}
-                                </button>
-                              </div>
-                            </>
-                          )
+                              )}
+                              <button
+                                className="primary-button"
+                                type="button"
+                                onClick={saveMatch}
+                              >
+                                {t("completeMatch")}
+                              </button>
+                            </div>
+                          </>
                         )}
-                        {match.goals.map((goal) => (
-                          <p key={goal.id}>
-                            {playerName(goal.scorer)}
-                            {goal.assist ? ` (${playerName(goal.assist)})` : ""}
-                          </p>
-                        ))}
                       </div>
                     );
                   })}

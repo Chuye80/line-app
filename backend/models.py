@@ -261,10 +261,11 @@ class MatchGoal(Base):
         ForeignKey("matches.id", ondelete="CASCADE"),
         nullable=False,
     )
-    scorer_membership_id: Mapped[UUID] = mapped_column(
+    team_name: Mapped[str] = mapped_column(Text, nullable=False)
+    scorer_membership_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("memberships.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     assist_membership_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
@@ -274,7 +275,7 @@ class MatchGoal(Base):
     created_at: Mapped[datetime] = created_at_col()
 
     match: Mapped["Match"] = relationship(back_populates="goals")
-    scorer: Mapped["Membership"] = relationship(foreign_keys=[scorer_membership_id])
+    scorer: Mapped["Membership | None"] = relationship(foreign_keys=[scorer_membership_id])
     assister: Mapped["Membership | None"] = relationship(foreign_keys=[assist_membership_id])
 
 
