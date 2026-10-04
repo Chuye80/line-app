@@ -3235,9 +3235,9 @@ function App() {
                           match.home_team_name,
                           match.away_team_name
                         );
-                    const saveMatch = () =>
-                      runAction(async () => {
-                        await apiFetch(
+                    const saveMatch = async () => {
+                      await runAction(() =>
+                        apiFetch(
                           `/groups/${group.id}/matches/${match.id}/complete`,
                           {
                             method: "POST",
@@ -3246,18 +3246,19 @@ function App() {
                               goals: buildCompleteGoalsPayload(drafts),
                             }),
                           }
-                        );
-                        setGoalDrafts((previous) => {
-                          const next = { ...previous };
-                          delete next[match.id];
-                          return next;
-                        });
-                        setEditingMatches((previous) => {
-                          const next = new Set(previous);
-                          next.delete(match.id);
-                          return next;
-                        });
+                        )
+                      );
+                      setGoalDrafts((previous) => {
+                        const next = { ...previous };
+                        delete next[match.id];
+                        return next;
                       });
+                      setEditingMatches((previous) => {
+                        const next = new Set(previous);
+                        next.delete(match.id);
+                        return next;
+                      });
+                    };
                     return (
                       <div className="team-box" key={match.id}>
                         <h3>
