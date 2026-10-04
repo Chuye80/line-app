@@ -3481,47 +3481,106 @@ function App() {
                       );
                       discardMatchEdits();
                     };
+                    const otherTeamName = (side: string) =>
+                      side === match.home_team_name
+                        ? match.away_team_name
+                        : match.home_team_name;
                     const renderLineupPlayer = (
                       player: Member,
-                      side: string
-                    ) => (
-                      <div className="match-lineup-player" key={player.id}>
-                        <span>
-                          {playerName(player)}{" "}
-                          <span className="match-lineup-hint">
-                            ({permanentTeams[player.id]
-                              ? `${t("gameDayTeam")}: ${permanentTeams[player.id]}`
-                              : t("unassigned")}
-                            )
-                          </span>
-                        </span>
-                        {showLineupEditor && (
-                          <>
+                      currentSide: string
+                    ) => {
+                      const permanentTeam = permanentTeams[player.id];
+                      const isBorrowed =
+                        Boolean(permanentTeam) && permanentTeam !== currentSide;
+                      const destination = otherTeamName(currentSide);
+                      return (
+                        <div className="match-lineup-row" key={player.id}>
+                          <div className="match-lineup-row-main">
+                            <span className="match-lineup-name">
+                              {playerName(player)}
+                            </span>
+                            {isBorrowed && (
+                              <span className="match-lineup-borrowed">
+                                {t("normally")} {permanentTeam}
+                              </span>
+                            )}
+                          </div>
+                          {showLineupEditor && (
+                            <div className="match-lineup-row-actions">
+                              <button
+                                className="secondary-button match-lineup-move"
+                                type="button"
+                                onClick={() =>
+                                  movePlayerToSide(player.id, destination)
+                                }
+                              >
+                                {t("moveTo")} {destination}
+                              </button>
+                              <button
+                                className="match-lineup-remove text-danger-button"
+                                type="button"
+                                onClick={() => removePlayerFromLineup(player.id)}
+                              >
+                                {t("removePlayer")}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
+                    const renderAvailablePlayer = (player: Member) => {
+                      const permanentTeam = permanentTeams[player.id];
+                      return (
+                        <div className="match-lineup-row" key={player.id}>
+                          <div className="match-lineup-row-main">
+                            <span className="match-lineup-name">
+                              {playerName(player)}
+                            </span>
+                            <span className="match-lineup-badge">
+                              {permanentTeam ?? t("unassigned")}
+                            </span>
+                          </div>
+                          <div className="match-lineup-row-actions">
                             <button
-                              className="secondary-button"
+                              className="secondary-button match-lineup-add"
                               type="button"
                               onClick={() =>
-                                movePlayerToSide(
-                                  player.id,
-                                  side === match.home_team_name
-                                    ? match.away_team_name
-                                    : match.home_team_name
-                                )
+                                addPlayerToSide(player.id, match.home_team_name)
                               }
                             >
-                              {side === match.home_team_name
-                                ? t("awayTeam")
-                                : t("homeTeam")}
+                              + {match.home_team_name}
                             </button>
                             <button
-                              className="text-danger-button"
+                              className="secondary-button match-lineup-add"
                               type="button"
-                              onClick={() => removePlayerFromLineup(player.id)}
+                              onClick={() =>
+                                addPlayerToSide(player.id, match.away_team_name)
+                              }
                             >
-                              {t("removeFromLineup")}
+                              + {match.away_team_name}
                             </button>
-                          </>
-                        )}
+                          </div>
+                        </div>
+                      );
+                    };
+                    const renderLineupTeams = () => (
+                      <div className="match-lineup-columns">
+                        <div className="match-lineup-side match-lineup-side-home">
+                          <h5 className="match-lineup-side-title">
+                            {match.home_team_name} ({homeLineup.length})
+                          </h5>
+                          {homeLineup.map((player) =>
+                            renderLineupPlayer(player, match.home_team_name)
+                          )}
+                        </div>
+                        <div className="match-lineup-side match-lineup-side-away">
+                          <h5 className="match-lineup-side-title">
+                            {match.away_team_name} ({awayLineup.length})
+                          </h5>
+                          {awayLineup.map((player) =>
+                            renderLineupPlayer(player, match.away_team_name)
+                          )}
+                        </div>
                       </div>
                     );
                     return (
@@ -3558,30 +3617,7 @@ function App() {
                               </button>
                             )}
                             <div className="match-lineup-editor">
-                              <div className="match-lineup-columns">
-                                <div className="match-lineup-side">
-                                  <h4>
-                                    {match.home_team_name} ({homeLineup.length})
-                                  </h4>
-                                  {homeLineup.map((player) =>
-                                    renderLineupPlayer(
-                                      player,
-                                      match.home_team_name
-                                    )
-                                  )}
-                                </div>
-                                <div className="match-lineup-side">
-                                  <h4>
-                                    {match.away_team_name} ({awayLineup.length})
-                                  </h4>
-                                  {awayLineup.map((player) =>
-                                    renderLineupPlayer(
-                                      player,
-                                      match.away_team_name
-                                    )
-                                  )}
-                                </div>
-                              </div>
+                              {renderLineupTeams()}
                             </div>
                             {match.goals.map((goal) => (
                               <p key={goal.id}>
@@ -3615,75 +3651,23 @@ function App() {
                         )}
                         {showLineupEditor && (
                           <div className="match-lineup-editor">
-                            <div className="match-lineup-columns">
-                              <div className="match-lineup-side">
-                                <h4>
-                                  {match.home_team_name} ({homeLineup.length})
-                                </h4>
-                                {homeLineup.map((player) =>
-                                  renderLineupPlayer(
-                                    player,
-                                    match.home_team_name
-                                  )
-                                )}
-                              </div>
-                              <div className="match-lineup-side">
-                                <h4>
-                                  {match.away_team_name} ({awayLineup.length})
-                                </h4>
-                                {awayLineup.map((player) =>
-                                  renderLineupPlayer(
-                                    player,
-                                    match.away_team_name
-                                  )
-                                )}
-                              </div>
-                            </div>
+                            <h4 className="match-lineup-title">
+                              {t("matchLineup")}
+                            </h4>
+                            <p className="muted-text match-lineup-intro">
+                              {t("matchLineupHint")}
+                            </p>
+                            {renderLineupTeams()}
                             <div className="match-lineup-pool">
-                              <h4>{t("availablePlayers")}</h4>
-                              {availablePlayers.map((player) => (
-                                <div
-                                  className="match-lineup-player"
-                                  key={player.id}
-                                >
-                                  <span>
-                                    {playerName(player)}{" "}
-                                    <span className="match-lineup-hint">
-                                      ({permanentTeams[player.id]
-                                        ? `${t("gameDayTeam")}: ${permanentTeams[player.id]}`
-                                        : t("unassigned")}
-                                      )
-                                    </span>
-                                  </span>
-                                  <button
-                                    className="secondary-button"
-                                    type="button"
-                                    onClick={() =>
-                                      addPlayerToSide(
-                                        player.id,
-                                        match.home_team_name
-                                      )
-                                    }
-                                  >
-                                    {match.home_team_name}
-                                  </button>
-                                  <button
-                                    className="secondary-button"
-                                    type="button"
-                                    onClick={() =>
-                                      addPlayerToSide(
-                                        player.id,
-                                        match.away_team_name
-                                      )
-                                    }
-                                  >
-                                    {match.away_team_name}
-                                  </button>
-                                </div>
-                              ))}
+                              <h5 className="match-lineup-pool-title">
+                                {t("availablePlayers")}
+                              </h5>
+                              {availablePlayers.map((player) =>
+                                renderAvailablePlayer(player)
+                              )}
                             </div>
                             {match.status === "open" && isAdjustingLineup && (
-                              <div className="form-actions">
+                              <div className="form-actions match-lineup-actions">
                                 <button
                                   className="secondary-button"
                                   type="button"

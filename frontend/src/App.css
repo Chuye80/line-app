@@ -1089,39 +1089,135 @@ button:disabled {
 
 .match-lineup-editor {
   margin: 1rem 0;
-  padding: 0.75rem;
+  padding: 0.85rem;
   border: 1px solid #d1d5db;
   border-radius: 8px;
   background: #fff;
 }
 
+.match-lineup-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.match-lineup-intro {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+}
+
 .match-lineup-columns {
-  display: grid;
-  gap: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
 }
 
 @media (min-width: 720px) {
   .match-lineup-columns {
-    grid-template-columns: 1fr 1fr;
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .match-lineup-side {
+    flex: 1;
+    min-width: 0;
   }
 }
 
-.match-lineup-side h4,
-.match-lineup-pool h4 {
-  margin: 0 0 0.5rem;
+.match-lineup-side {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
 }
 
-.match-lineup-player {
+.match-lineup-side-home {
+  border-top: 3px solid #2563eb;
+}
+
+.match-lineup-side-away {
+  border-top: 3px solid #dc2626;
+}
+
+.match-lineup-side-title,
+.match-lineup-pool-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.match-lineup-pool {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.match-lineup-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.35rem;
+  justify-content: space-between;
+  gap: 0.45rem 0.65rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid #e5e7eb;
 }
 
-.match-lineup-hint {
+.match-lineup-row:last-child {
+  border-bottom: none;
+}
+
+.match-lineup-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  min-width: 0;
+  flex: 1 1 9rem;
+}
+
+.match-lineup-name {
+  font-weight: 600;
+}
+
+.match-lineup-borrowed {
+  font-size: 0.82rem;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.match-lineup-badge {
+  font-size: 0.82rem;
   color: #6b7280;
-  font-size: 0.9rem;
+  background: #eef2f7;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+}
+
+.match-lineup-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.match-lineup-move,
+.match-lineup-add {
+  font-size: 0.85rem;
+  padding: 0.28rem 0.55rem;
+  white-space: nowrap;
+}
+
+.match-lineup-remove {
+  font-size: 0.78rem;
+  padding: 0.22rem 0.45rem;
+  opacity: 0.9;
+}
+
+.match-lineup-actions {
+  margin-top: 0.85rem;
 }
 
 .goal-row {
