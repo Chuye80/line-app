@@ -3616,9 +3616,6 @@ function App() {
                                 {t("editMatch")}
                               </button>
                             )}
-                            <div className="match-lineup-editor">
-                              {renderLineupTeams()}
-                            </div>
                             {match.goals.map((goal) => (
                               <p key={goal.id}>
                                 {goal.team_name}:{" "}
