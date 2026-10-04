@@ -3304,7 +3304,7 @@ function App() {
                       </button>
                     </div>
                   )}
-                  {gameDay.matches.map((match) => {
+                  {[...gameDay.matches].reverse().map((match) => {
                     const isEditing = editingMatches.has(match.id);
                     const isAdjustingLineup = adjustingLineups.has(match.id);
                     const isEditable =
