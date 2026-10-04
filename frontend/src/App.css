@@ -1087,6 +1087,43 @@ button:disabled {
   margin: 12px 0 0;
 }
 
+.match-lineup-editor {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.match-lineup-columns {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 720px) {
+  .match-lineup-columns {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.match-lineup-side h4,
+.match-lineup-pool h4 {
+  margin: 0 0 0.5rem;
+}
+
+.match-lineup-player {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.match-lineup-hint {
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
 .goal-row {
   align-items: flex-end;
 }

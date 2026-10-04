@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import func, text
+from sqlalchemy import func, select, text
 
 from backend.database import get_db, read_engine
 from backend.models import (
@@ -160,8 +160,18 @@ class CreateMatchRequest(BaseModel):
     away_team_name: str
 
 
+class MatchLineupItem(BaseModel):
+    membership_id: UUID
+    team_name: str = Field(min_length=1)
+
+
+class UpdateMatchLineupRequest(BaseModel):
+    players: list[MatchLineupItem]
+
+
 class CompleteMatchRequest(BaseModel):
     goals: list["GoalItem"] = []
+    players: list[MatchLineupItem] | None = None
 
 
 class GoalItem(BaseModel):
@@ -892,6 +902,120 @@ def announce_mvp(db: Session, game_day: GameDay, votes: list[MvpVote] | None = N
                 )
     game_day.mvp_closed_at = now_utc()
     db.commit()
+
+
+def participant_ids_for(db: Session, game_day: GameDay) -> set[UUID]:
+    rows = db.scalars(
+        select(Registration.membership_id).where(
+            Registration.game_day_id == game_day.id,
+            Registration.status == "participant",
+        )
+    ).all()
+    return set(rows)
+
+
+def validate_match_lineup(
+    match: Match,
+    players: list[MatchLineupItem],
+    participant_ids: set[UUID],
+) -> dict[str, set[UUID]]:
+    allowed_teams = {match.home_team_name, match.away_team_name}
+    players_by_team: dict[str, set[UUID]] = defaultdict(set)
+    seen: set[UUID] = set()
+    for item in players:
+        if item.team_name not in allowed_teams:
+            raise HTTPException(
+                status_code=400,
+                detail="Each player must belong to one of the match teams",
+            )
+        if item.membership_id not in participant_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Each player must be registered for this Game Day",
+            )
+        if item.membership_id in seen:
+            raise HTTPException(
+                status_code=400,
+                detail="Each player can appear only once in a match lineup",
+            )
+        seen.add(item.membership_id)
+        players_by_team[item.team_name].add(item.membership_id)
+    if not players_by_team.get(match.home_team_name):
+        raise HTTPException(
+            status_code=400,
+            detail="The home team must have at least one player",
+        )
+    if not players_by_team.get(match.away_team_name):
+        raise HTTPException(
+            status_code=400,
+            detail="The away team must have at least one player",
+        )
+    return players_by_team
+
+
+def players_by_team_from_match(match: Match) -> dict[str, set[UUID]]:
+    grouped: dict[str, set[UUID]] = defaultdict(set)
+    for item in match.players:
+        grouped[item.team_name].add(item.membership_id)
+    return grouped
+
+
+def validate_match_goals(
+    goals: list[GoalItem],
+    players_by_team: dict[str, set[UUID]],
+    home_team_name: str,
+    away_team_name: str,
+) -> None:
+    allowed_teams = {home_team_name, away_team_name}
+    for goal in goals:
+        if goal.team_name not in allowed_teams:
+            raise HTTPException(
+                status_code=400,
+                detail="Each goal must belong to one of the match teams",
+            )
+        team_players = players_by_team.get(goal.team_name)
+        if not team_players:
+            raise HTTPException(
+                status_code=400,
+                detail="Each goal must belong to one of the match teams",
+            )
+        if goal.scorer_membership_id and goal.scorer_membership_id not in team_players:
+            raise HTTPException(
+                status_code=400,
+                detail="Scorer must belong to the scoring team",
+            )
+        if goal.assist_membership_id and goal.assist_membership_id not in team_players:
+            raise HTTPException(
+                status_code=400,
+                detail="Assist must come from the scoring team",
+            )
+        if (
+            goal.scorer_membership_id
+            and goal.assist_membership_id
+            and goal.assist_membership_id == goal.scorer_membership_id
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="A player cannot assist their own goal",
+            )
+
+
+def replace_match_players(
+    db: Session,
+    match: Match,
+    players: list[MatchLineupItem],
+) -> None:
+    for item in list(match.players):
+        db.delete(item)
+    db.flush()
+    for item in players:
+        db.add(
+            MatchPlayer(
+                match_id=match.id,
+                membership_id=item.membership_id,
+                team_name=item.team_name,
+            )
+        )
 
 
 def scores_from_goal_teams(
@@ -2201,6 +2325,45 @@ def create_match(
     return serialize_game_day(db, game_day, caller)
 
 
+@app.put("/groups/{group_id}/matches/{match_id}/lineup")
+def update_match_lineup(
+    group_id: UUID,
+    match_id: UUID,
+    request: UpdateMatchLineupRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_admin(db, group, user)
+    match = db.get(Match, match_id)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Match not found")
+    game_day = db.get(GameDay, match.game_day_id)
+    if game_day is None or game_day.group_id != group.id:
+        raise HTTPException(status_code=404, detail="Match not found")
+    game_day = sync_game_day_status(db, game_day)
+    if game_day.status != "live":
+        raise HTTPException(
+            status_code=400,
+            detail="Matches can only be edited during a Live Game Day",
+        )
+    if match.status != "open":
+        raise HTTPException(
+            status_code=400,
+            detail="Lineup can only be adjusted for open matches",
+        )
+    validate_match_lineup(
+        match,
+        request.players,
+        participant_ids_for(db, game_day),
+    )
+    replace_match_players(db, match, request.players)
+    db.commit()
+    db.refresh(match)
+    caller = membership_for_user(db, group.id, user.id)
+    return serialize_game_day(db, game_day, caller)
+
+
 @app.post("/groups/{group_id}/matches/{match_id}/complete")
 def complete_match(
     group_id: UUID,
@@ -2223,38 +2386,29 @@ def complete_match(
             status_code=400,
             detail="Matches can only be saved during a Live Game Day",
         )
-    if match.status == "completed":
+    was_completed = match.status == "completed"
+    participant_ids = participant_ids_for(db, game_day)
+    if was_completed and request.players is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Lineup is required when correcting a completed match",
+        )
+    if request.players is not None:
+        players_by_team = validate_match_lineup(match, request.players, participant_ids)
+    else:
+        players_by_team = players_by_team_from_match(match)
+    validate_match_goals(
+        request.goals,
+        players_by_team,
+        match.home_team_name,
+        match.away_team_name,
+    )
+    if request.players is not None:
+        replace_match_players(db, match, request.players)
+    if was_completed:
         for goal in list(match.goals):
             db.delete(goal)
-    players_by_team: dict[str, set[UUID]] = defaultdict(set)
-    for item in match.players:
-        players_by_team[item.team_name].add(item.membership_id)
     for goal in request.goals:
-        team_players = players_by_team.get(goal.team_name)
-        if not team_players:
-            raise HTTPException(
-                status_code=400,
-                detail="Each goal must belong to one of the match teams",
-            )
-        if goal.scorer_membership_id and goal.scorer_membership_id not in team_players:
-            raise HTTPException(
-                status_code=400,
-                detail="Scorer must belong to the scoring team",
-            )
-        if goal.assist_membership_id and goal.assist_membership_id not in team_players:
-            raise HTTPException(
-                status_code=400,
-                detail="Assist must come from the scoring team",
-            )
-        if (
-            goal.scorer_membership_id
-            and goal.assist_membership_id
-            and goal.assist_membership_id == goal.scorer_membership_id
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="A player cannot assist their own goal",
-            )
         db.add(
             MatchGoal(
                 match_id=match.id,
@@ -2271,7 +2425,8 @@ def complete_match(
     match.home_score = home_score
     match.away_score = away_score
     match.status = "completed"
-    match.completed_at = now_utc()
+    if not was_completed:
+        match.completed_at = now_utc()
     db.commit()
     db.refresh(match)
     caller = membership_for_user(db, group.id, user.id)

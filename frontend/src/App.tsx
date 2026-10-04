@@ -60,6 +60,11 @@ type GoalDraft = {
   assist: string;
 };
 
+type LineupDraftItem = {
+  membership_id: string;
+  team_name: string;
+};
+
 function scoreFromGoalDrafts(
   goals: GoalDraft[],
   homeTeam: string,
@@ -90,6 +95,87 @@ function buildCompleteGoalsPayload(goals: GoalDraft[]) {
       scorer_membership_id: goal.scorer || null,
       assist_membership_id: goal.assist || null,
     }));
+}
+
+function lineupDraftFromPlayers(players: Member[]): LineupDraftItem[] {
+  return players.map((player) => ({
+    membership_id: player.id,
+    team_name: player.team_name ?? "",
+  }));
+}
+
+function buildLineupPayload(draft: LineupDraftItem[]) {
+  return draft
+    .filter((item) => item.team_name)
+    .map((item) => ({
+      membership_id: item.membership_id,
+      team_name: item.team_name,
+    }));
+}
+
+function permanentTeamByMember(gameDay: GameDay): Record<string, string | null> {
+  const map: Record<string, string | null> = {};
+  for (const team of gameDay.teams) {
+    for (const player of team.players) {
+      map[player.id] = team.name;
+    }
+  }
+  for (const player of gameDay.unassigned) {
+    map[player.id] = null;
+  }
+  for (const player of gameDay.participants) {
+    if (!(player.id in map)) {
+      map[player.id] = null;
+    }
+  }
+  return map;
+}
+
+function lineupPlayersForGoals(
+  draft: LineupDraftItem[] | undefined,
+  savedPlayers: Member[],
+  participants: Member[]
+): Member[] {
+  if (draft) {
+    const byId = new Map(participants.map((member) => [member.id, member]));
+    return draft
+      .filter((item) => item.team_name)
+      .flatMap((item) => {
+        const member = byId.get(item.membership_id);
+        if (!member) return [];
+        return [{ ...member, team_name: item.team_name }];
+      });
+  }
+  return savedPlayers;
+}
+
+function lineupDraftIsDirty(
+  draft: LineupDraftItem[] | undefined,
+  savedPlayers: Member[]
+): boolean {
+  if (!draft) return false;
+  const serialize = (items: LineupDraftItem[]) =>
+    items
+      .filter((item) => item.team_name)
+      .map((item) => `${item.membership_id}:${item.team_name}`)
+      .sort()
+      .join("|");
+  return serialize(draft) !== serialize(lineupDraftFromPlayers(savedPlayers));
+}
+
+function clearGoalDraftPlayerReferences(
+  goals: GoalDraft[],
+  membershipId: string,
+  fromSide?: string
+): GoalDraft[] {
+  return goals.map((goal) => {
+    if (fromSide && goal.team !== fromSide) return goal;
+    return {
+      ...goal,
+      scorer: goal.scorer === membershipId ? "" : goal.scorer,
+      assist: goal.assist === membershipId ? "" : goal.assist,
+    };
+  });
 }
 
 type MatchInfo = {
@@ -485,7 +571,9 @@ function App() {
   const [homeTeam, setHomeTeam] = useState("");
   const [awayTeam, setAwayTeam] = useState("");
   const [goalDrafts, setGoalDrafts] = useState<Record<string, GoalDraft[]>>({});
+  const [lineupDrafts, setLineupDrafts] = useState<Record<string, LineupDraftItem[]>>({});
   const [editingMatches, setEditingMatches] = useState<Set<string>>(() => new Set());
+  const [adjustingLineups, setAdjustingLineups] = useState<Set<string>>(() => new Set());
   const [mvpChoice, setMvpChoice] = useState("");
   const [surveyDraft, setSurveyDraft] = useState<
     Record<string, Partial<SurveyRating>>
@@ -3218,13 +3306,37 @@ function App() {
                   )}
                   {gameDay.matches.map((match) => {
                     const isEditing = editingMatches.has(match.id);
+                    const isAdjustingLineup = adjustingLineups.has(match.id);
                     const isEditable =
                       isAdmin &&
                       isLive &&
                       (match.status !== "completed" || isEditing);
                     const showReadOnlyResult =
                       match.status === "completed" && !isEditing;
+                    const showLineupEditor =
+                      isEditable && (isEditing || isAdjustingLineup);
                     const drafts = isEditable ? (goalDrafts[match.id] ?? []) : [];
+                    const permanentTeams = permanentTeamByMember(gameDay);
+                    const lineupDraft =
+                      lineupDrafts[match.id] ??
+                      (showLineupEditor
+                        ? lineupDraftFromPlayers(match.players)
+                        : undefined);
+                    const lineupPlayers = lineupPlayersForGoals(
+                      isEditing || isAdjustingLineup ? lineupDraft : undefined,
+                      match.players,
+                      gameDay.participants
+                    );
+                    const homeLineup = lineupPlayers.filter(
+                      (player) => player.team_name === match.home_team_name
+                    );
+                    const awayLineup = lineupPlayers.filter(
+                      (player) => player.team_name === match.away_team_name
+                    );
+                    const assignedIds = new Set(lineupPlayers.map((player) => player.id));
+                    const availablePlayers = gameDay.participants.filter(
+                      (player) => !assignedIds.has(player.id)
+                    );
                     const displayScore = showReadOnlyResult
                       ? {
                           home: match.home_score ?? 0,
@@ -3235,20 +3347,13 @@ function App() {
                           match.home_team_name,
                           match.away_team_name
                         );
-                    const saveMatch = async () => {
-                      await runAction(() =>
-                        apiFetch(
-                          `/groups/${group.id}/matches/${match.id}/complete`,
-                          {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              goals: buildCompleteGoalsPayload(drafts),
-                            }),
-                          }
-                        )
-                      );
+                    const discardMatchEdits = () => {
                       setGoalDrafts((previous) => {
+                        const next = { ...previous };
+                        delete next[match.id];
+                        return next;
+                      });
+                      setLineupDrafts((previous) => {
                         const next = { ...previous };
                         delete next[match.id];
                         return next;
@@ -3258,7 +3363,167 @@ function App() {
                         next.delete(match.id);
                         return next;
                       });
+                      setAdjustingLineups((previous) => {
+                        const next = new Set(previous);
+                        next.delete(match.id);
+                        return next;
+                      });
                     };
+                    const updateLineupDraft = (nextLineup: LineupDraftItem[]) => {
+                      setLineupDrafts((previous) => ({
+                        ...previous,
+                        [match.id]: nextLineup,
+                      }));
+                    };
+                    const addPlayerToSide = (
+                      membershipId: string,
+                      teamName: string
+                    ) => {
+                      const current = lineupDraft ?? [];
+                      updateLineupDraft([
+                        ...current.filter(
+                          (item) => item.membership_id !== membershipId
+                        ),
+                        { membership_id: membershipId, team_name: teamName },
+                      ]);
+                    };
+                    const removePlayerFromLineup = (membershipId: string) => {
+                      const current = lineupDraft ?? [];
+                      updateLineupDraft(
+                        current.filter(
+                          (item) => item.membership_id !== membershipId
+                        )
+                      );
+                      setGoalDrafts((previous) => ({
+                        ...previous,
+                        [match.id]: clearGoalDraftPlayerReferences(
+                          previous[match.id] ?? [],
+                          membershipId
+                        ),
+                      }));
+                    };
+                    const movePlayerToSide = (
+                      membershipId: string,
+                      teamName: string
+                    ) => {
+                      const current = lineupDraft ?? [];
+                      const previousSide = current.find(
+                        (item) => item.membership_id === membershipId
+                      )?.team_name;
+                      updateLineupDraft(
+                        current.map((item) =>
+                          item.membership_id === membershipId
+                            ? { ...item, team_name: teamName }
+                            : item
+                        )
+                      );
+                      if (previousSide && previousSide !== teamName) {
+                        setGoalDrafts((previous) => ({
+                          ...previous,
+                          [match.id]: clearGoalDraftPlayerReferences(
+                            previous[match.id] ?? [],
+                            membershipId,
+                            previousSide
+                          ),
+                        }));
+                      }
+                    };
+                    const saveLineup = async () => {
+                      await runAction(() =>
+                        apiFetch(
+                          `/groups/${group.id}/matches/${match.id}/lineup`,
+                          {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              players: buildLineupPayload(lineupDraft ?? []),
+                            }),
+                          }
+                        )
+                      );
+                      setLineupDrafts((previous) => {
+                        const next = { ...previous };
+                        delete next[match.id];
+                        return next;
+                      });
+                      setAdjustingLineups((previous) => {
+                        const next = new Set(previous);
+                        next.delete(match.id);
+                        return next;
+                      });
+                    };
+                    const saveMatch = async () => {
+                      if (
+                        match.status === "open" &&
+                        lineupDraftIsDirty(lineupDrafts[match.id], match.players)
+                      ) {
+                        setError(t("lineupSaveFirst"));
+                        return;
+                      }
+                      const payload: {
+                        goals: ReturnType<typeof buildCompleteGoalsPayload>;
+                        players?: ReturnType<typeof buildLineupPayload>;
+                      } = {
+                        goals: buildCompleteGoalsPayload(drafts),
+                      };
+                      if (isEditing) {
+                        payload.players = buildLineupPayload(lineupDraft ?? []);
+                      }
+                      await runAction(() =>
+                        apiFetch(
+                          `/groups/${group.id}/matches/${match.id}/complete`,
+                          {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(payload),
+                          }
+                        )
+                      );
+                      discardMatchEdits();
+                    };
+                    const renderLineupPlayer = (
+                      player: Member,
+                      side: string
+                    ) => (
+                      <div className="match-lineup-player" key={player.id}>
+                        <span>
+                          {playerName(player)}{" "}
+                          <span className="match-lineup-hint">
+                            ({permanentTeams[player.id]
+                              ? `${t("gameDayTeam")}: ${permanentTeams[player.id]}`
+                              : t("unassigned")}
+                            )
+                          </span>
+                        </span>
+                        {showLineupEditor && (
+                          <>
+                            <button
+                              className="secondary-button"
+                              type="button"
+                              onClick={() =>
+                                movePlayerToSide(
+                                  player.id,
+                                  side === match.home_team_name
+                                    ? match.away_team_name
+                                    : match.home_team_name
+                                )
+                              }
+                            >
+                              {side === match.home_team_name
+                                ? t("awayTeam")
+                                : t("homeTeam")}
+                            </button>
+                            <button
+                              className="text-danger-button"
+                              type="button"
+                              onClick={() => removePlayerFromLineup(player.id)}
+                            >
+                              {t("removeFromLineup")}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    );
                     return (
                       <div className="team-box" key={match.id}>
                         <h3>
@@ -3278,6 +3543,12 @@ function App() {
                                     ...previous,
                                     [match.id]: goalDraftsFromMatch(match.goals),
                                   }));
+                                  setLineupDrafts((previous) => ({
+                                    ...previous,
+                                    [match.id]: lineupDraftFromPlayers(
+                                      match.players
+                                    ),
+                                  }));
                                   setEditingMatches(
                                     (previous) => new Set([...previous, match.id])
                                   );
@@ -3286,6 +3557,32 @@ function App() {
                                 {t("editMatch")}
                               </button>
                             )}
+                            <div className="match-lineup-editor">
+                              <div className="match-lineup-columns">
+                                <div className="match-lineup-side">
+                                  <h4>
+                                    {match.home_team_name} ({homeLineup.length})
+                                  </h4>
+                                  {homeLineup.map((player) =>
+                                    renderLineupPlayer(
+                                      player,
+                                      match.home_team_name
+                                    )
+                                  )}
+                                </div>
+                                <div className="match-lineup-side">
+                                  <h4>
+                                    {match.away_team_name} ({awayLineup.length})
+                                  </h4>
+                                  {awayLineup.map((player) =>
+                                    renderLineupPlayer(
+                                      player,
+                                      match.away_team_name
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                             {match.goals.map((goal) => (
                               <p key={goal.id}>
                                 {goal.team_name}:{" "}
@@ -3299,11 +3596,128 @@ function App() {
                             ))}
                           </>
                         )}
+                        {isEditable && match.status === "open" && !isAdjustingLineup && (
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => {
+                              setLineupDrafts((previous) => ({
+                                ...previous,
+                                [match.id]: lineupDraftFromPlayers(match.players),
+                              }));
+                              setAdjustingLineups(
+                                (previous) => new Set([...previous, match.id])
+                              );
+                            }}
+                          >
+                            {t("adjustMatchLineups")}
+                          </button>
+                        )}
+                        {showLineupEditor && (
+                          <div className="match-lineup-editor">
+                            <div className="match-lineup-columns">
+                              <div className="match-lineup-side">
+                                <h4>
+                                  {match.home_team_name} ({homeLineup.length})
+                                </h4>
+                                {homeLineup.map((player) =>
+                                  renderLineupPlayer(
+                                    player,
+                                    match.home_team_name
+                                  )
+                                )}
+                              </div>
+                              <div className="match-lineup-side">
+                                <h4>
+                                  {match.away_team_name} ({awayLineup.length})
+                                </h4>
+                                {awayLineup.map((player) =>
+                                  renderLineupPlayer(
+                                    player,
+                                    match.away_team_name
+                                  )
+                                )}
+                              </div>
+                            </div>
+                            <div className="match-lineup-pool">
+                              <h4>{t("availablePlayers")}</h4>
+                              {availablePlayers.map((player) => (
+                                <div
+                                  className="match-lineup-player"
+                                  key={player.id}
+                                >
+                                  <span>
+                                    {playerName(player)}{" "}
+                                    <span className="match-lineup-hint">
+                                      ({permanentTeams[player.id]
+                                        ? `${t("gameDayTeam")}: ${permanentTeams[player.id]}`
+                                        : t("unassigned")}
+                                      )
+                                    </span>
+                                  </span>
+                                  <button
+                                    className="secondary-button"
+                                    type="button"
+                                    onClick={() =>
+                                      addPlayerToSide(
+                                        player.id,
+                                        match.home_team_name
+                                      )
+                                    }
+                                  >
+                                    {match.home_team_name}
+                                  </button>
+                                  <button
+                                    className="secondary-button"
+                                    type="button"
+                                    onClick={() =>
+                                      addPlayerToSide(
+                                        player.id,
+                                        match.away_team_name
+                                      )
+                                    }
+                                  >
+                                    {match.away_team_name}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                            {match.status === "open" && isAdjustingLineup && (
+                              <div className="form-actions">
+                                <button
+                                  className="secondary-button"
+                                  type="button"
+                                  onClick={() => {
+                                    setLineupDrafts((previous) => {
+                                      const next = { ...previous };
+                                      delete next[match.id];
+                                      return next;
+                                    });
+                                    setAdjustingLineups((previous) => {
+                                      const next = new Set(previous);
+                                      next.delete(match.id);
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  {t("cancelEdit")}
+                                </button>
+                                <button
+                                  className="primary-button"
+                                  type="button"
+                                  onClick={saveLineup}
+                                >
+                                  {t("saveLineups")}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {isEditable && (
                           <>
                             {drafts.map((goal, index) => {
                               const teamPlayers = goal.team
-                                ? match.players.filter(
+                                ? lineupPlayers.filter(
                                     (player) => player.team_name === goal.team
                                   )
                                 : [];
@@ -3442,18 +3856,7 @@ function App() {
                                 <button
                                   className="secondary-button"
                                   type="button"
-                                  onClick={() => {
-                                    setGoalDrafts((previous) => {
-                                      const next = { ...previous };
-                                      delete next[match.id];
-                                      return next;
-                                    });
-                                    setEditingMatches((previous) => {
-                                      const next = new Set(previous);
-                                      next.delete(match.id);
-                                      return next;
-                                    });
-                                  }}
+                                  onClick={discardMatchEdits}
                                 >
                                   {t("cancelEdit")}
                                 </button>
