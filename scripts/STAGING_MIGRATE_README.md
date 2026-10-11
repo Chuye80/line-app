@@ -47,7 +47,7 @@ Before anything runs, you (or an operator) confirm:
    | `LINEAPP_ALLOW_STAGING_MIGRATE` | `yes` |
    | `LINEAPP_STAGING_PROJECT_REF` | Staging `XXXXXXXX` from dashboard URL |
    | `LINEAPP_STAGING_DATABASE_URL` | Staging database URI |
-   | `LINEAPP_FORBIDDEN_PROJECT_REF` | Production `XXXXXXXX` (recommended) |
+   | `LINEAPP_FORBIDDEN_PROJECT_REF` | Production `XXXXXXXX` (**required**) |
 
 3. Ask the agent: **“Run `scripts/apply_staging_migrations_2_14.sh` on Staging.”**  
 4. The agent runs the script once, stops on any error, and reports **`verify_schema.sql`** pass or fail.
