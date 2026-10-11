@@ -92,9 +92,12 @@ create table if not exists public.developers (
   created_at timestamptz not null default now()
 );
 
-insert into public.developers (user_id)
-values ('369a716c-95ae-4a4a-ba4e-c916d9c54484')
-on conflict (user_id) do nothing;
+-- No developer UUID is seeded here: fresh environments have no auth.users rows
+-- yet, and production developer ids must not be copied into staging. After the
+-- first staging account exists, grant developer access explicitly, for example:
+--   insert into public.developers (user_id)
+--   values ('<staging-auth-user-uuid>')
+--   on conflict (user_id) do nothing;
 
 create table if not exists public.matches (
   id uuid primary key default gen_random_uuid(),
