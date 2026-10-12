@@ -31,6 +31,7 @@ instead of rating surveys).
 | `20260923064000_group_messages.sql` | Group chat table and RLS |
 | `20261002093700_goalkeeper_ratings.sql` | Separate goalkeeper ratings |
 | `20261004103000_match_goal_events.sql` | Goal events as score source of truth |
+| `20261012170000_team_captains.sql` | Team captains (`team_assignments.is_captain`), finish-time captain-name snapshot (`game_days.team_captain_names`) |
 
 ## Fresh staging / new Supabase project
 
@@ -54,4 +55,13 @@ An empty result set means the schema matches this directory.
 ## Local tests
 
 `supabase/testing/local_auth_stub.sql` is for plain Postgres test harnesses only
-( minimal `auth.users` stub ). Never apply it to a hosted Supabase project.
+( minimal `auth.users` / `auth.uid()` stub ). Never apply it to a hosted Supabase project.
+
+Backend integration tests build a throwaway database from the stub plus every
+migration on a **local** PostgreSQL server (non-local hosts are refused):
+
+```bash
+pip install -r requirements-dev.txt
+LINEAPP_TEST_PG_ADMIN_URL='postgresql://postgres@/postgres?host=/tmp&port=54329' \
+  python -m pytest backend/tests
+```
