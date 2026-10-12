@@ -28,10 +28,12 @@ expected_columns (table_name, column_name) as (
         ('game_days', 'status'), ('game_days', 'participant_count'), ('game_days', 'players_per_team'),
         ('game_days', 'is_rotating'), ('game_days', 'champion_team_name'),
         ('game_days', 'mvp_closed_at'), ('game_days', 'finished_at'),
+        ('game_days', 'team_captain_names'),
         ('registrations', 'id'), ('registrations', 'game_day_id'), ('registrations', 'membership_id'),
         ('registrations', 'status'), ('registrations', 'created_at'),
         ('team_assignments', 'id'), ('team_assignments', 'game_day_id'),
         ('team_assignments', 'membership_id'), ('team_assignments', 'team_name'),
+        ('team_assignments', 'is_captain'),
         ('developers', 'user_id'), ('developers', 'created_at'),
         ('matches', 'id'), ('matches', 'game_day_id'), ('matches', 'home_team_name'),
         ('matches', 'away_team_name'), ('matches', 'home_score'), ('matches', 'away_score'),
@@ -62,7 +64,17 @@ expected_public_functions (name) as (
         ('lineapp_member_json'),
         ('lineapp_promote_waiting'),
         ('lineapp_game_day_json'),
-        ('lineapp_read_group')
+        ('lineapp_read_group'),
+        ('lineapp_team_captain_names')
+),
+expected_constraints (table_name, constraint_name) as (
+    values
+        ('team_assignments', 'team_assignments_captain_on_team'),
+        ('game_days', 'game_days_team_captain_names_object')
+),
+expected_indexes (name) as (
+    values
+        ('team_assignments_one_captain_per_team')
 ),
 expected_private_functions (name) as (
     values
@@ -135,6 +147,23 @@ findings as (
         select 1 from pg_proc p
         join pg_namespace ns on ns.oid = p.pronamespace
         where ns.nspname = 'public' and p.proname = f.name
+    )
+
+    union all
+    select 'missing constraint', table_name || '.' || constraint_name
+    from expected_constraints e
+    where not exists (
+        select 1 from pg_constraint c
+        where c.conrelid = to_regclass('public.' || quote_ident(e.table_name))
+          and c.conname = e.constraint_name
+    )
+
+    union all
+    select 'missing index', 'public.' || name
+    from expected_indexes e
+    where not exists (
+        select 1 from pg_indexes i
+        where i.schemaname = 'public' and i.indexname = e.name
     )
 
     union all
