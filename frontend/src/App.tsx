@@ -4,6 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import "./App.css";
 import { supabase } from "./supabase";
 import { translations, type Language } from "./i18n";
+import { championLabel, teamDisplayNames, teamLabel } from "./teamNames";
 
 const API_URL =
   import.meta.env.VITE_API_URL?.replace(/\/$/, "") ??
@@ -41,7 +42,9 @@ type Member = {
 };
 
 type Team = {
+  /** Internal identifier ("Team A"); display via teamLabel. */
   name: string;
+  captain_id?: string | null;
   players: Member[];
   total_rating: number;
   average_rating: number;
@@ -210,6 +213,8 @@ type GameDay = {
   players_per_team: number;
   is_rotating: boolean;
   champion_team_name: string | null;
+  /** Internal team name -> captain name (frozen once the day is finished). */
+  team_captain_names?: Record<string, string>;
   mvp_open: boolean;
   mvp_announced: boolean;
   votes_cast: number;
@@ -1529,7 +1534,7 @@ function App() {
     }`;
   }
 
-  function standingsTable(rows: Standing[]) {
+  function standingsTable(rows: Standing[], displayNames: Record<string, string>) {
     return (
       <div className="standings-table-scroll">
         <table className="standings-table">
@@ -1550,7 +1555,9 @@ function App() {
             {rows.map((row, index) => (
               <tr key={row.name}>
                 <td className="standings-position">{index + 1}</td>
-                <td className="standings-team">{row.name}</td>
+                <td className="standings-team">
+                  {teamLabel(displayNames, row.name)}
+                </td>
                 <td>{row.played}</td>
                 <td>{row.wins}</td>
                 <td>{row.draws}</td>
@@ -1775,6 +1782,16 @@ function App() {
   const gameDay = group?.game_day ?? null;
   const finishedGameDay = group?.finished_game_day ?? null;
   const teamNames = gameDay?.teams.map((team) => team.name) ?? [];
+  const currentTeamNames = teamDisplayNames(
+    gameDay?.team_captain_names,
+    t("captainTeam")
+  );
+  const finishedTeamNames = teamDisplayNames(
+    finishedGameDay?.team_captain_names,
+    t("captainTeam")
+  );
+  const currentTeamLabel = (teamName: string) =>
+    teamLabel(currentTeamNames, teamName);
   const isLive = gameDay?.status === "live";
   const dayStatisticsRows: StatisticsTableRow[] = dayStats.map((row) => ({
     id: row.member.id,
@@ -3155,7 +3172,7 @@ function App() {
                     {gameDay.teams.map((team) => (
                       <div className="team-box" key={team.name}>
                         <div className="team-header">
-                          <h3>{team.name}</h3>
+                          <h3>{currentTeamLabel(team.name)}</h3>
                           <span
                             className={
                               editingTeams &&
@@ -3171,6 +3188,38 @@ function App() {
                             /{gameDay.players_per_team}
                           </span>
                         </div>
+                        {isAdmin && !editingTeams && (
+                          <label className="team-captain-select">
+                            {t("captain")}
+                            <select
+                              value={team.captain_id ?? ""}
+                              onChange={(event) =>
+                                runAction(() =>
+                                  apiFetch(
+                                    `/groups/${group.id}/game-days/${gameDay.id}/captain`,
+                                    {
+                                      method: "PUT",
+                                      headers: {
+                                        "Content-Type": "application/json",
+                                      },
+                                      body: JSON.stringify({
+                                        team_name: team.name,
+                                        membership_id: event.target.value || null,
+                                      }),
+                                    }
+                                  )
+                                ).catch(() => undefined)
+                              }
+                            >
+                              <option value="">{t("noCaptain")}</option>
+                              {team.players.map((player) => (
+                                <option key={player.id} value={player.id}>
+                                  {playerName(player)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                         {(editingTeams
                           ? gameDay.participants.filter(
                               (player) => teamDraft[player.id] === team.name
@@ -3191,7 +3240,7 @@ function App() {
                                 <option value="">{t("unassigned")}</option>
                                 {teamNames.map((name) => (
                                   <option key={name} value={name}>
-                                    {name}
+                                    {currentTeamLabel(name)}
                                   </option>
                                 ))}
                               </select>
@@ -3199,6 +3248,11 @@ function App() {
                           ) : (
                             <p key={player.id}>
                               {playerName(player)} ({playerRatings(player)})
+                              {player.id === team.captain_id && (
+                                <span className="captain-badge">
+                                  {t("captain")}
+                                </span>
+                              )}
                             </p>
                           )
                         )}
@@ -3229,7 +3283,7 @@ function App() {
                                 <option value="">{t("unassigned")}</option>
                                 {teamNames.map((name) => (
                                   <option key={name} value={name}>
-                                    {name}
+                                    {currentTeamLabel(name)}
                                   </option>
                                 ))}
                               </select>
@@ -3261,7 +3315,7 @@ function App() {
                             <option value="">—</option>
                             {teamNames.map((name) => (
                               <option key={name} value={name}>
-                                {name}
+                                {currentTeamLabel(name)}
                               </option>
                             ))}
                           </select>
@@ -3275,7 +3329,7 @@ function App() {
                             <option value="">—</option>
                             {teamNames.map((name) => (
                               <option key={name} value={name}>
-                                {name}
+                                {currentTeamLabel(name)}
                               </option>
                             ))}
                           </select>
@@ -3499,9 +3553,9 @@ function App() {
                             <span className="match-lineup-name">
                               {playerName(player)}
                             </span>
-                            {isBorrowed && (
+                            {isBorrowed && permanentTeam && (
                               <span className="match-lineup-borrowed">
-                                {t("normally")} {permanentTeam}
+                                {t("normally")} {currentTeamLabel(permanentTeam)}
                               </span>
                             )}
                           </div>
@@ -3514,7 +3568,7 @@ function App() {
                                   movePlayerToSide(player.id, destination)
                                 }
                               >
-                                {t("moveTo")} {destination}
+                                {t("moveTo")} {currentTeamLabel(destination)}
                               </button>
                               <button
                                 className="match-lineup-remove text-danger-button"
@@ -3537,7 +3591,9 @@ function App() {
                               {playerName(player)}
                             </span>
                             <span className="match-lineup-badge">
-                              {permanentTeam ?? t("unassigned")}
+                              {permanentTeam
+                                ? currentTeamLabel(permanentTeam)
+                                : t("unassigned")}
                             </span>
                           </div>
                           <div className="match-lineup-row-actions">
@@ -3548,7 +3604,7 @@ function App() {
                                 addPlayerToSide(player.id, match.home_team_name)
                               }
                             >
-                              + {match.home_team_name}
+                              + {currentTeamLabel(match.home_team_name)}
                             </button>
                             <button
                               className="secondary-button match-lineup-add"
@@ -3557,7 +3613,7 @@ function App() {
                                 addPlayerToSide(player.id, match.away_team_name)
                               }
                             >
-                              + {match.away_team_name}
+                              + {currentTeamLabel(match.away_team_name)}
                             </button>
                           </div>
                         </div>
@@ -3567,7 +3623,8 @@ function App() {
                       <div className="match-lineup-columns">
                         <div className="match-lineup-side match-lineup-side-home">
                           <h5 className="match-lineup-side-title">
-                            {match.home_team_name} ({homeLineup.length})
+                            {currentTeamLabel(match.home_team_name)} (
+                            {homeLineup.length})
                           </h5>
                           {homeLineup.map((player) =>
                             renderLineupPlayer(player, match.home_team_name)
@@ -3575,7 +3632,8 @@ function App() {
                         </div>
                         <div className="match-lineup-side match-lineup-side-away">
                           <h5 className="match-lineup-side-title">
-                            {match.away_team_name} ({awayLineup.length})
+                            {currentTeamLabel(match.away_team_name)} (
+                            {awayLineup.length})
                           </h5>
                           {awayLineup.map((player) =>
                             renderLineupPlayer(player, match.away_team_name)
@@ -3586,7 +3644,8 @@ function App() {
                     return (
                       <div className="team-box" key={match.id}>
                         <h3>
-                          {match.home_team_name} vs {match.away_team_name}
+                          {currentTeamLabel(match.home_team_name)} vs{" "}
+                          {currentTeamLabel(match.away_team_name)}
                         </h3>
                         <p className="match-score">
                           {displayScore.home} - {displayScore.away}
@@ -3618,7 +3677,7 @@ function App() {
                             )}
                             {match.goals.map((goal) => (
                               <p key={goal.id}>
-                                {goal.team_name}:{" "}
+                                {currentTeamLabel(goal.team_name)}:{" "}
                                 {goal.scorer
                                   ? playerName(goal.scorer)
                                   : t("unknownScorer")}
@@ -3730,10 +3789,10 @@ function App() {
                                     >
                                       <option value="">—</option>
                                       <option value={match.home_team_name}>
-                                        {match.home_team_name}
+                                        {currentTeamLabel(match.home_team_name)}
                                       </option>
                                       <option value={match.away_team_name}>
-                                        {match.away_team_name}
+                                        {currentTeamLabel(match.away_team_name)}
                                       </option>
                                     </select>
                                   </label>
@@ -3870,7 +3929,7 @@ function App() {
                   }
                 >
                   <h2>{t("standings")}</h2>
-                  {standingsTable(gameDay.standings)}
+                  {standingsTable(gameDay.standings, currentTeamNames)}
                 </section>
               )}
 
@@ -3886,7 +3945,11 @@ function App() {
                           {finishedGameDay.awards.champions.length > 1
                             ? t("coChampions")
                             : t("champion")}
-                          : {finishedGameDay.champion_team_name}
+                          :{" "}
+                          {championLabel(
+                            finishedTeamNames,
+                            finishedGameDay.champion_team_name
+                          )}
                         </h2>
                         {finishedGameDay.awards.champions.length > 0 && (
                           <p className="champion-squad">
@@ -3898,7 +3961,7 @@ function App() {
                       </>
                     )}
                   {finishedGameDay.standings.length > 0 && (
-                    standingsTable(finishedGameDay.standings)
+                    standingsTable(finishedGameDay.standings, finishedTeamNames)
                   )}
                   {finishedGameDay.mvp_announced ? (
                     <p>
