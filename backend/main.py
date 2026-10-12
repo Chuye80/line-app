@@ -155,6 +155,11 @@ class UpdateTeamsRequest(BaseModel):
     assignments: list[TeamAssignmentItem]
 
 
+class SetCaptainRequest(BaseModel):
+    team_name: str = Field(min_length=1)
+    membership_id: UUID | None = None
+
+
 class CreateMatchRequest(BaseModel):
     home_team_name: str
     away_team_name: str
@@ -449,6 +454,44 @@ def clear_teams(db: Session, game_day: GameDay) -> None:
         TeamAssignment.game_day_id == game_day.id
     ).delete(synchronize_session="fetch")
     db.flush()
+
+
+def locked_game_day_or_404(db: Session, group: Group, game_day_id: UUID) -> GameDay:
+    """Row-locks the game day so captain, team and finish changes serialize."""
+    game_day = (
+        db.query(GameDay)
+        .filter(GameDay.id == game_day_id, GameDay.group_id == group.id)
+        .with_for_update()
+        .first()
+    )
+    if game_day is None:
+        raise HTTPException(status_code=404, detail="Game Day not found")
+    return game_day
+
+
+def require_not_finished(game_day: GameDay, detail: str) -> None:
+    if game_day.status == "finished":
+        raise HTTPException(status_code=400, detail=detail)
+
+
+def current_captains(db: Session, game_day: GameDay) -> dict[UUID, str]:
+    rows = (
+        db.query(TeamAssignment)
+        .filter(
+            TeamAssignment.game_day_id == game_day.id,
+            TeamAssignment.is_captain.is_(True),
+        )
+        .all()
+    )
+    return {row.membership_id: row.team_name for row in rows if row.team_name}
+
+
+def team_captain_names_snapshot(db: Session, game_day: GameDay) -> dict[str, str]:
+    value = db.execute(
+        text("SELECT public.lineapp_team_captain_names(CAST(:gid AS uuid))"),
+        {"gid": str(game_day.id)},
+    ).scalar()
+    return decode_jsonb(value) or {}
 
 
 def promote_waiting_players(db: Session, game_day: GameDay) -> None:
@@ -2211,6 +2254,7 @@ def generate_teams(
     game_day = db.get(GameDay, game_day_id)
     if game_day is None or game_day.group_id != group.id:
         raise HTTPException(status_code=404, detail="Game Day not found")
+    require_not_finished(game_day, "Teams cannot be changed after the Game Day is finished")
     registrations = participant_registrations(game_day)
     if len(registrations) != game_day.participant_count:
         raise HTTPException(
@@ -2255,9 +2299,8 @@ def update_teams(
 ):
     group = get_group_or_404(db, group_id)
     require_admin(db, group, user)
-    game_day = db.get(GameDay, game_day_id)
-    if game_day is None or game_day.group_id != group.id:
-        raise HTTPException(status_code=404, detail="Game Day not found")
+    game_day = locked_game_day_or_404(db, group, game_day_id)
+    require_not_finished(game_day, "Teams cannot be changed after the Game Day is finished")
     if not game_day.is_rotating and game_day.status == "live":
         raise HTTPException(
             status_code=400,
@@ -2267,6 +2310,8 @@ def update_teams(
     requested_ids = [item.membership_id for item in request.assignments]
     if set(requested_ids) != valid_ids:
         raise HTTPException(status_code=400, detail="Assignments must include every participating player")
+    # Captaincy survives an adjustment only for a captain who stays on the same team.
+    captains = current_captains(db, game_day)
     clear_teams(db, game_day)
     for item in request.assignments:
         db.add(
@@ -2274,8 +2319,56 @@ def update_teams(
                 game_day_id=game_day.id,
                 membership_id=item.membership_id,
                 team_name=item.team_name,
+                is_captain=(
+                    item.team_name is not None
+                    and captains.get(item.membership_id) == item.team_name
+                ),
             )
         )
+    db.commit()
+    caller = membership_for_user(db, group.id, user.id)
+    return slim_game_day_dict(db, game_day, caller)
+
+
+@app.put("/groups/{group_id}/game-days/{game_day_id}/captain")
+def set_team_captain(
+    group_id: UUID,
+    game_day_id: UUID,
+    request: SetCaptainRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_admin(db, group, user)
+    game_day = locked_game_day_or_404(db, group, game_day_id)
+    require_not_finished(game_day, "Captains cannot be changed after the Game Day is finished")
+    team_rows = (
+        db.query(TeamAssignment)
+        .filter(
+            TeamAssignment.game_day_id == game_day.id,
+            TeamAssignment.team_name == request.team_name,
+        )
+        .all()
+    )
+    if not team_rows:
+        raise HTTPException(status_code=404, detail="Team not found")
+    captain = None
+    if request.membership_id is not None:
+        captain = next(
+            (row for row in team_rows if row.membership_id == request.membership_id),
+            None,
+        )
+        if captain is None:
+            raise HTTPException(
+                status_code=400,
+                detail="The captain must be a player assigned to this team",
+            )
+    # Clear first: the one-captain-per-team index is checked row by row.
+    for row in team_rows:
+        row.is_captain = False
+    db.flush()
+    if captain is not None:
+        captain.is_captain = True
     db.commit()
     caller = membership_for_user(db, group.id, user.id)
     return slim_game_day_dict(db, game_day, caller)
@@ -2461,13 +2554,12 @@ def finish_game_day(
 ):
     group = get_group_or_404(db, group_id)
     require_admin(db, group, user)
-    game_day = db.get(GameDay, game_day_id)
-    if game_day is None or game_day.group_id != group.id:
-        raise HTTPException(status_code=404, detail="Game Day not found")
+    game_day = locked_game_day_or_404(db, group, game_day_id)
     if game_day.status == "finished":
         raise HTTPException(status_code=400, detail="Game Day is already finished")
     game_day.status = "finished"
     game_day.finished_at = now_utc()
+    game_day.team_captain_names = team_captain_names_snapshot(db, game_day)
     if not game_day.is_rotating:
         completed = [item for item in game_day.matches if item.status == "completed"]
         if completed:
