@@ -15,7 +15,7 @@ Migration **1 is already done** on Staging (you applied it in the SQL Editor). T
 
 2. **Database connection string (password stays private)**  
    - In Staging: **Project Settings** → **Database** → **Connection string** → **URI**.  
-   - Choose **Direct connection** (port **5432**) if available — best for migrations.  
+   - Choose **Direct connection** (port **5432**) if available — best for migrations — or the **Session Pooler** (also port **5432**). The **Transaction Pooler (port 6543) is refused** by the script.  
    - Copy the URI. It contains your database password. **Do not paste it into chat, email, or git.**
 
 3. **(Recommended) Production project ref for safety**  
@@ -68,12 +68,26 @@ Before anything runs, you (or an operator) confirm:
 ## What the script does (safety)
 
 1. **Refuses to run** unless `LINEAPP_ALLOW_STAGING_MIGRATE=yes`.  
-2. **Compares** the project ref in the URL with `LINEAPP_STAGING_PROJECT_REF`.  
-3. **Blocks** if the ref matches `LINEAPP_FORBIDDEN_PROJECT_REF` (production guard).  
-4. **Checks** migration 1: all seven baseline tables exist; `games` exists before rename.  
-5. **Skips migration 2** automatically if it detects migration 2 already applied.  
-6. **Runs migrations 2–14** one file at a time; **stops immediately** on the first error.  
-7. **Runs** `supabase/verify_schema.sql` — success means **no output rows** (empty result = pass).
+2. **Accepts only** these URI shapes (anything else is refused, and the password is never printed):
+   - Direct: `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres`
+   - Session Pooler: `postgresql://postgres.<ref>:<pw>@aws-<n>-<region>.pooler.supabase.com:5432/postgres`
+   - Port must be **5432**; `<ref>` is 20 lowercase letters/digits; special characters in the password must be percent-encoded; only `sslmode`, `sslrootcert`, `connect_timeout`, `application_name` query parameters are allowed.
+3. **Compares** the project ref in the URL with `LINEAPP_STAGING_PROJECT_REF`.  
+4. **Blocks** if the ref matches `LINEAPP_FORBIDDEN_PROJECT_REF` (production guard).  
+5. **Ignores** ambient `PG*` connection variables and `~/.psqlrc`, so only the verified URI is used.  
+6. **Checks** migration 1: all seven baseline tables exist; `games` exists before rename.  
+7. **Checks** `public.memberships` has **0 rows**; otherwise stops before any migration.  
+8. **Skips migration 2** automatically if it detects migration 2 already applied.  
+9. **Runs migrations 2–14** one file at a time; **stops immediately** on the first error.  
+10. **Runs** `supabase/verify_schema.sql` — success means **no output rows** (empty result = pass).
+
+### Read-only dry run
+
+`./scripts/apply_staging_migrations_2_14.sh --preflight-only` runs steps 2–8 with every database session forced read-only, prints which migrations would run, and applies nothing. It does not need `LINEAPP_ALLOW_STAGING_MIGRATE`.
+
+### Safety tests (no database needed)
+
+`bash scripts/test_apply_staging_migrations_safety.sh` — uses a mock `psql`; must report `0 failed`.
 
 ---
 
