@@ -12,43 +12,104 @@ VERIFY_SQL="$ROOT/supabase/verify_schema.sql"
 # Migration 2 completion markers (20260909120100_integrity_constraints_and_indexes.sql)
 M2_MARKER_COUNT=12
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+NC=$'\033[0m'
 
 log() { printf '%s\n' "$*"; }
 fail() { printf "${RED}ERROR:%s${NC}\n" " $*" >&2; exit 1; }
 
+SUPABASE_REF_RE='^[a-z0-9]{20}$'
+DIRECT_HOST_RE='^db\.([a-z0-9]{20})\.supabase\.co$'
+POOLER_HOST_RE='^aws-[0-9]+-[a-z]{2}-[a-z]+-[0-9]+\.pooler\.supabase\.com$'
+POOLER_USER_RE='^postgres\.([a-z0-9]{20})$'
+ALLOWED_URI_PARAMS=" sslmode sslrootcert connect_timeout application_name "
+
+reject_uri() { printf 'URI rejected: %s\n' "$*" >&2; return 1; }
+
+# Prints the project ref for an accepted URI; never echoes the password.
+# Accepted forms (port 5432 only, database "postgres"):
+#   direct:         postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres
+#   session pooler: postgresql://postgres.<ref>:<pw>@aws-<n>-<region>.pooler.supabase.com:5432/postgres
 extract_project_ref() {
   local url="$1"
-  local host userpart ref
+  local rest userinfo hostpart user hostport host port tail dbname query param key
 
-  if [[ "$url" =~ postgres(ql)?://([^@]+)@ ]]; then
-    userpart="${BASH_REMATCH[2]}"
-    if [[ "$userpart" =~ ^postgres\.([a-z0-9]{15,25})$ ]]; then
-      printf '%s' "${BASH_REMATCH[1]}"
-      return 0
-    fi
+  case "$url" in
+    postgresql://*) rest="${url#postgresql://}" ;;
+    postgres://*) rest="${url#postgres://}" ;;
+    *) reject_uri "scheme must be postgresql:// or postgres://"; return 1 ;;
+  esac
+
+  # libpq splits credentials at the first '@' or '/', so anything ambiguous fails closed.
+  local at_only="${rest//[^@]/}"
+  [[ ${#at_only} -eq 1 ]] \
+    || { reject_uri "expected exactly one '@' (percent-encode special characters in the password)"; return 1; }
+  userinfo="${rest%%@*}"
+  hostpart="${rest#*@}"
+  [[ "$userinfo" != *[/?#]* ]] \
+    || { reject_uri "user/password contains '/', '?' or '#' (percent-encode them)"; return 1; }
+  user="${userinfo%%:*}"
+
+  hostport="${hostpart%%[/?]*}"
+  tail="${hostpart:${#hostport}}"
+  if [[ "$hostport" == *:* ]]; then
+    host="${hostport%%:*}"
+    port="${hostport#*:}"
+  else
+    host="$hostport"
+    port=""
   fi
 
-  host="$(printf '%s' "$url" | sed -E 's|^[^@]+@([^:/]+).*$|\1|')"
-  if [[ "$host" =~ ^db\.([a-z0-9]+)\.supabase\.co$ ]]; then
+  dbname=""
+  query=""
+  if [[ "$tail" == /* ]]; then
+    dbname="${tail#/}"
+    dbname="${dbname%%\?*}"
+  fi
+  if [[ "$tail" == *\?* ]]; then
+    query="${tail#*\?}"
+  fi
+
+  [[ "$dbname" == "postgres" ]] || { reject_uri "database must be /postgres"; return 1; }
+
+  if [[ -n "$query" ]]; then
+    local params
+    IFS='&' read -ra params <<< "$query"
+    for param in "${params[@]}"; do
+      key="${param%%=*}"
+      [[ "$ALLOWED_URI_PARAMS" == *" $key "* ]] \
+        || { reject_uri "query parameter '$key' is not permitted"; return 1; }
+    done
+  fi
+
+  if [[ "$host" =~ $DIRECT_HOST_RE ]]; then
+    local ref="${BASH_REMATCH[1]}"
+    [[ "$user" == "postgres" ]] \
+      || { reject_uri "direct connection user must be 'postgres'"; return 1; }
+    [[ "$port" == "5432" ]] \
+      || { reject_uri "direct connection port must be 5432"; return 1; }
+    printf '%s' "$ref"
+    return 0
+  fi
+
+  if [[ "$host" =~ $POOLER_HOST_RE ]]; then
+    [[ "$user" =~ $POOLER_USER_RE ]] \
+      || { reject_uri "pooler user must be postgres.<20-char project ref>"; return 1; }
+    [[ "$port" == "5432" ]] \
+      || { reject_uri "pooler port must be 5432 (Session Pooler); the Transaction Pooler (6543) is not permitted"; return 1; }
     printf '%s' "${BASH_REMATCH[1]}"
     return 0
   fi
 
-  if [[ "$host" == *pooler.supabase.com* ]] || [[ "$host" == *supabase.com* ]]; then
-    if [[ "$url" =~ postgres\.([a-z0-9]+) ]]; then
-      printf '%s' "${BASH_REMATCH[1]}"
-      return 0
-    fi
-  fi
-
+  reject_uri "host is not a permitted Supabase direct (db.<ref>.supabase.co) or pooler (aws-<n>-<region>.pooler.supabase.com) host"
   return 1
 }
 
 verify_staging_identity() {
-  if [[ "${LINEAPP_ALLOW_STAGING_MIGRATE:-}" != "yes" ]]; then
+  local mode="${1:-migrate}"
+
+  if [[ "$mode" != "preflight" && "${LINEAPP_ALLOW_STAGING_MIGRATE:-}" != "yes" ]]; then
     fail "Set LINEAPP_ALLOW_STAGING_MIGRATE=yes to confirm you intend to modify Staging only."
   fi
 
@@ -59,13 +120,18 @@ verify_staging_identity() {
   [[ -n "${LINEAPP_FORBIDDEN_PROJECT_REF:-}" ]] \
     || fail "LINEAPP_FORBIDDEN_PROJECT_REF is required (production project ref — used as a deny target)."
 
+  [[ "$LINEAPP_STAGING_PROJECT_REF" =~ $SUPABASE_REF_RE ]] \
+    || fail "LINEAPP_STAGING_PROJECT_REF must be exactly 20 lowercase letters/digits (check for spaces or a pasted URL)."
+  [[ "$LINEAPP_FORBIDDEN_PROJECT_REF" =~ $SUPABASE_REF_RE ]] \
+    || fail "LINEAPP_FORBIDDEN_PROJECT_REF must be exactly 20 lowercase letters/digits (check for spaces or a pasted URL)."
+
   if [[ "$LINEAPP_STAGING_PROJECT_REF" == "$LINEAPP_FORBIDDEN_PROJECT_REF" ]]; then
     fail "Staging project ref must not equal production (LINEAPP_FORBIDDEN_PROJECT_REF)."
   fi
 
   local url_ref
   if ! url_ref="$(extract_project_ref "$LINEAPP_STAGING_DATABASE_URL")"; then
-    fail "Could not extract Supabase project ref from LINEAPP_STAGING_DATABASE_URL. Use a standard Supabase URI (db.<ref>.supabase.co or pooler with user postgres.<ref>)."
+    fail "LINEAPP_STAGING_DATABASE_URL is not a permitted Supabase URI (direct db.<ref>.supabase.co:5432 or Session Pooler postgres.<ref>@aws-<n>-<region>.pooler.supabase.com:5432, database /postgres)."
   fi
 
   if [[ "$url_ref" != "$LINEAPP_STAGING_PROJECT_REF" ]]; then
@@ -111,11 +177,14 @@ select (
 SQL
 }
 
+# stdout carries only the start step (2 or 3); callers capture it with $(...), so logs go to stderr.
 resolve_migration2_start() {
   local games_exists m2_count
 
-  games_exists="$("${PSQL[@]}" -t -A -c "select to_regclass('public.games') is not null;")"
-  m2_count="$("${PSQL[@]}" -t -A -c "$(migration2_marker_count_sql)")"
+  games_exists="$("${PSQL[@]}" -t -A -c "select to_regclass('public.games') is not null;")" \
+    || fail "Migration 2 detection: games check failed."
+  m2_count="$("${PSQL[@]}" -t -A -c "$(migration2_marker_count_sql)")" \
+    || fail "Migration 2 detection: marker query failed."
   m2_count="${m2_count//[[:space:]]/}"
 
   if [[ ! "$m2_count" =~ ^[0-9]+$ ]]; then
@@ -123,7 +192,7 @@ resolve_migration2_start() {
   fi
 
   if (( m2_count == 0 )); then
-    log "Migration 2: not applied (0/$M2_MARKER_COUNT markers)."
+    log "Migration 2: not applied (0/$M2_MARKER_COUNT markers)." >&2
     printf '%s' "2"
     return 0
   fi
@@ -132,7 +201,7 @@ resolve_migration2_start() {
     if [[ "$games_exists" != "t" ]]; then
       fail "Migration 2 markers complete but public.games is missing — unexpected state; stop and investigate."
     fi
-    log "Migration 2: fully applied ($M2_MARKER_COUNT/$M2_MARKER_COUNT markers). Skipping migration 2."
+    log "Migration 2: fully applied ($M2_MARKER_COUNT/$M2_MARKER_COUNT markers). Skipping migration 2." >&2
     printf '%s' "3"
     return 0
   fi
@@ -141,10 +210,11 @@ resolve_migration2_start() {
 }
 
 run_verify_schema() {
-  local verify_tmp verify_rows psql_status
+  local verify_tmp verify_rows
 
   verify_tmp="$(mktemp)"
-  trap 'rm -f "$verify_tmp"' RETURN
+  # RETURN traps are global; clear it so it does not fire on later function returns.
+  trap 'rm -f "$verify_tmp"; trap - RETURN' RETURN
 
   if ! "${PSQL[@]}" -t -A -f "$VERIFY_SQL" >"$verify_tmp"; then
     fail "verify_schema.sql failed to execute (connection error or SQL error)."
@@ -160,19 +230,44 @@ run_verify_schema() {
   log "${GREEN}verify_schema.sql: PASS (no issues reported)${NC}"
 }
 
+usage() {
+  log "Usage: $0 [--preflight-only]"
+  log "  --preflight-only  Run identity and read-only database checks, print the plan, apply nothing."
+}
+
 main() {
-  verify_staging_identity
+  local preflight_only=0
+  while (($# > 0)); do
+    case "$1" in
+      --preflight-only) preflight_only=1 ;;
+      -h|--help) usage; exit 0 ;;
+      *) usage >&2; fail "Unknown argument: $1" ;;
+    esac
+    shift
+  done
+
+  if (( preflight_only )); then
+    verify_staging_identity preflight
+  else
+    verify_staging_identity
+  fi
 
   command -v psql >/dev/null 2>&1 \
     || fail "psql is not installed. Install PostgreSQL client tools or run via Cursor Cloud Agent."
 
-  PSQL=(psql "$LINEAPP_STAGING_DATABASE_URL" -v ON_ERROR_STOP=1 -q)
+  # libpq would otherwise honour these over (or alongside) the verified URI.
+  unset PGHOST PGHOSTADDR PGPORT PGUSER PGDATABASE PGSERVICE PGSERVICEFILE PGOPTIONS
+  if (( preflight_only )); then
+    export PGOPTIONS='-c default_transaction_read_only=on'
+  fi
+
+  PSQL=(psql "$LINEAPP_STAGING_DATABASE_URL" -X -v ON_ERROR_STOP=1 -q)
 
   log "=== Pre-flight: migration 1 state & database consistency ==="
 
   local preflight_out
   preflight_out="$("${PSQL[@]}" -t -A -F'|' <<'SQL'
-select coalesce(string_agg(table_name || ':' || exists::text, ',' order by table_name), '')
+select coalesce(string_agg(table_name || ':' || case when exists then 't' else 'f' end, ',' order by table_name), '')
 from (
   select t.table_name,
          to_regclass('public.' || t.table_name) is not null as exists
@@ -199,6 +294,20 @@ SQL
   if ((${#missing_baseline[@]} > 0)); then
     fail "Baseline incomplete (migration 1 missing?). Missing tables: ${missing_baseline[*]}"
   fi
+  if ((${#PARTS[@]} != 7)); then
+    fail "Pre-flight baseline query returned ${#PARTS[@]} tables, expected 7 (got: $preflight_out)."
+  fi
+
+  local memberships_rows
+  memberships_rows="$("${PSQL[@]}" -t -A -c "select count(*) from public.memberships;")" \
+    || fail "Pre-flight memberships row-count query failed."
+  memberships_rows="${memberships_rows//[[:space:]]/}"
+  [[ "$memberships_rows" =~ ^[0-9]+$ ]] \
+    || fail "Could not read public.memberships row count (got: $memberships_rows)."
+  if (( memberships_rows != 0 )); then
+    fail "public.memberships has $memberships_rows rows; Staging must have 0 before migrations 2–14. Stop and investigate."
+  fi
+  log "Pre-flight: public.memberships has 0 rows."
 
   local game_days_exists games_exists private_schema has_read_group
   game_days_exists="$("${PSQL[@]}" -t -A -c "select to_regclass('public.game_days') is not null;")" \
@@ -227,7 +336,9 @@ SQL
   fi
 
   local start
-  start="$(resolve_migration2_start)"
+  start="$(resolve_migration2_start)" || exit 1
+  [[ "$start" == "2" || "$start" == "3" ]] \
+    || fail "Internal error: migration start must be 2 or 3 (got: $start)."
 
   local migrations=(
     20260909120100_integrity_constraints_and_indexes.sql
@@ -247,6 +358,11 @@ SQL
 
   log "Will apply migrations from step $start through 14 (${#migrations[@]} files in chain)."
   log ""
+
+  if (( preflight_only )); then
+    log "${GREEN}Pre-flight only: all checks passed. No migrations were applied.${NC}"
+    exit 0
+  fi
 
   local i idx file path
   for i in "${!migrations[@]}"; do
