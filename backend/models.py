@@ -14,7 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base
@@ -138,6 +138,7 @@ class GameDay(Base):
     players_per_team: Mapped[int] = mapped_column(Integer, nullable=False)
     is_rotating: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     champion_team_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    team_captain_names: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     mvp_closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -199,6 +200,7 @@ class TeamAssignment(Base):
         nullable=False,
     )
     team_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_captain: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     game_day: Mapped["GameDay"] = relationship(back_populates="team_assignments")
     membership: Mapped["Membership"] = relationship()
