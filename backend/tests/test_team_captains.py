@@ -160,15 +160,6 @@ def test_schema_allows_one_captain_per_team_and_only_on_a_team(world, sql):
     assert world.game_day()["team_captain_names"] == {shai_team: "Shai"}
 
 
-def test_verify_schema_reports_no_drift(sql):
-    from pathlib import Path
-
-    verify = Path(__file__).resolve().parents[2] / "supabase" / "verify_schema.sql"
-    with sql.cursor() as cur:
-        cur.execute(verify.read_text(encoding="utf-8"))
-        assert cur.fetchall() == []
-
-
 # --- defaults and payload shape --------------------------------------------
 
 

@@ -1,5 +1,5 @@
 """Integration-test harness: a throwaway local PostgreSQL database built from
-supabase/testing/local_auth_stub.sql plus every file in supabase/migrations.
+committed test fixtures plus the migrations present on this branch.
 
 Set LINEAPP_TEST_PG_ADMIN_URL to a *local* server's maintenance database, e.g.
     postgresql://postgres@/postgres?host=/tmp&port=54329
@@ -19,6 +19,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = sorted((ROOT / "supabase" / "migrations").glob("*.sql"))
 AUTH_STUB = ROOT / "supabase" / "testing" / "local_auth_stub.sql"
+PRE_BETA_SCHEMA = ROOT / "backend" / "tests" / "fixtures" / "pre_beta_schema.sql"
 TEST_DB = "lineapp_pytest"
 
 
@@ -49,7 +50,7 @@ def _build_database(admin_url: str) -> str:
 
     url = _with_database(admin_url, TEST_DB)
     conn = psycopg2.connect(url)
-    for path in [AUTH_STUB, *MIGRATIONS]:
+    for path in [AUTH_STUB, PRE_BETA_SCHEMA, *MIGRATIONS]:
         with conn, conn.cursor() as cur:
             cur.execute(path.read_text(encoding="utf-8"))
     conn.close()
