@@ -5,6 +5,9 @@ import "./App.css";
 import { supabase } from "./supabase";
 import { translations, type Language } from "./i18n";
 import { championLabel, teamDisplayNames, teamLabel } from "./teamNames";
+import { PlayerAvatar } from "./PlayerAvatar";
+import { removeAvatar, uploadAvatar } from "./avatarStorage";
+import { matchesMemberSearch } from "./profileUtils";
 
 const API_URL =
   import.meta.env.VITE_API_URL?.replace(/\/$/, "") ??
@@ -32,6 +35,12 @@ type Member = {
   id: string;
   user_id: string | null;
   name: string;
+  full_name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  nickname?: string | null;
+  avatar_path?: string | null;
+  avatar_version?: number;
   rating: number;
   goalkeeper_rating: number;
   is_subscriber: boolean;
@@ -283,6 +292,9 @@ type JoinRequest = {
   id: string;
   user_id: string;
   user_name: string;
+  user_full_name?: string | null;
+  avatar_path?: string | null;
+  avatar_version?: number;
   status: string;
 };
 
@@ -290,6 +302,8 @@ type GroupMessage = {
   id: string;
   sender_user_id: string;
   sender_name: string;
+  sender_avatar_path?: string | null;
+  sender_avatar_version?: number;
   message: string;
   created_at: string;
 };
@@ -298,6 +312,13 @@ type UserProfile = {
   id: string;
   email: string | null;
   display_name: string;
+  first_name: string | null;
+  last_name: string | null;
+  nickname: string | null;
+  full_name: string;
+  avatar_path: string | null;
+  avatar_version: number;
+  is_complete: boolean;
 };
 
 type StatRow = Member & {
@@ -312,6 +333,11 @@ type StatRow = Member & {
 type StatisticsTableRow = {
   id: string;
   name: string;
+  full_name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  avatar_path?: string | null;
+  avatar_version?: number;
   rating: number;
   goalkeeperRating: number;
   gameDays: number;
@@ -330,15 +356,6 @@ type StatisticsTableColumn = {
 };
 
 const RATING_STEPS = [1, 2, 3, 4, 5];
-
-function championSquads(champions: Member[]) {
-  const squads = new Map<string, string[]>();
-  champions.forEach((champion) => {
-    const team = champion.team_name ?? "";
-    squads.set(team, [...(squads.get(team) ?? []), champion.name]);
-  });
-  return [...squads.values()];
-}
 
 function SortableStatisticsTable({
   rows,
@@ -419,7 +436,16 @@ function SortableStatisticsTable({
             <tr key={row.id}>
               {columns.map((column) => (
                 <td key={column.key}>
-                  {column.display ? column.display(row) : column.value(row)}
+                  {column.key === "name" ? (
+                    <span className="player-identity">
+                      <PlayerAvatar player={row} size="small" />
+                      {row.name}
+                    </span>
+                  ) : column.display ? (
+                    column.display(row)
+                  ) : (
+                    column.value(row)
+                  )}
                 </td>
               ))}
             </tr>
@@ -512,16 +538,21 @@ function App() {
   const [simulatedName, setSimulatedName] = useState("");
 
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
-  const [displayName, setDisplayName] = useState("");
+  const [signupFirstName, setSignupFirstName] = useState("");
+  const [signupLastName, setSignupLastName] = useState("");
+  const [signupNickname, setSignupNickname] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [profileDraft, setProfileDraft] = useState("");
+  const [profileFirstName, setProfileFirstName] = useState("");
+  const [profileLastName, setProfileLastName] = useState("");
+  const [profileNickname, setProfileNickname] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
 
   const [myGroups, setMyGroups] = useState<MyGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -617,7 +648,9 @@ function App() {
   const otherRealAdmins = otherRealMembers.filter((member) => member.is_admin);
   const isSoleRealAdmin = Boolean(isAdmin && otherRealAdmins.length === 0);
   const sortedGroupMembers = useMemo(() => {
-    const members = group?.members ?? [];
+    const members = (group?.members ?? []).filter((member) =>
+      matchesMemberSearch(member, memberSearch)
+    );
     return [
       ...members.filter((member) => member.is_admin),
       ...members.filter(
@@ -632,7 +665,7 @@ function App() {
         (member) => !member.is_admin && member.is_virtual
       ),
     ];
-  }, [group?.members]);
+  }, [group?.members, memberSearch]);
   const surveyEligibleMembers =
     group?.members.filter(
       (member) =>
@@ -741,12 +774,18 @@ function App() {
     }
   }
 
+  function populateProfileForm(value: UserProfile | null) {
+    setProfileFirstName(value?.first_name ?? value?.display_name ?? "");
+    setProfileLastName(value?.last_name ?? "");
+    setProfileNickname(value?.nickname ?? "");
+  }
+
   async function loadProfile() {
     const response = await apiFetch("/profile");
     if (!response.ok) throw new Error(await parseError(response));
     const data = (await response.json()) as UserProfile;
     setProfile(data);
-    setProfileDraft(data.display_name);
+    populateProfileForm(data);
     return data;
   }
 
@@ -1070,7 +1109,7 @@ function App() {
       setProfile(null);
       setShowProfile(false);
       setEditingProfile(false);
-      setProfileDraft("");
+      populateProfileForm(null);
       setProfileError("");
       return;
     }
@@ -1304,14 +1343,21 @@ function App() {
     try {
       const normalizedEmail = email.trim();
       if (authMode === "signup") {
+        const firstName = signupFirstName.trim();
+        const lastName = signupLastName.trim();
+        if (!firstName || !lastName) {
+          throw new Error(t("firstAndLastRequired"));
+        }
         const { data, error: signUpError } = await supabase.auth.signUp({
           email: normalizedEmail,
           password,
           options: {
             emailRedirectTo: window.location.origin,
             data: {
-              display_name:
-                displayName.trim() || normalizedEmail.split("@")[0],
+              first_name: firstName,
+              last_name: lastName,
+              nickname: signupNickname.trim() || null,
+              display_name: signupNickname.trim() || firstName,
             },
           },
         });
@@ -1365,20 +1411,24 @@ function App() {
 
   async function saveProfile(event: FormEvent) {
     event.preventDefault();
-    const displayName = profileDraft.trim();
-    if (!displayName || profileSaving) return;
+    const firstName = profileFirstName.trim();
+    if (!firstName || profileSaving) return;
     setProfileSaving(true);
     setProfileError("");
     try {
       const response = await apiFetch("/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ display_name: displayName }),
+        body: JSON.stringify({
+          first_name: firstName,
+          last_name: profileLastName.trim() || null,
+          nickname: profileNickname.trim() || null,
+        }),
       });
       if (!response.ok) throw new Error(await parseError(response));
       const updated = (await response.json()) as UserProfile;
       setProfile(updated);
-      setProfileDraft(updated.display_name);
+      populateProfileForm(updated);
       setEditingProfile(false);
       setChatMessages((current) =>
         current.map((message) =>
@@ -1396,6 +1446,54 @@ function App() {
     } finally {
       setProfileSaving(false);
     }
+  }
+
+  async function saveAvatar(
+    file: File,
+    owner: UserProfile | Member,
+    prefix: string,
+    endpoint: string
+  ) {
+    setLoading(true);
+    setError("");
+    let newPath: string | null = null;
+    try {
+      newPath = await uploadAvatar(prefix, file);
+      const response = await apiFetch(endpoint, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ avatar_path: newPath }),
+      });
+      if (!response.ok) throw new Error(await parseError(response));
+      const updated = (await response.json()) as UserProfile | Member;
+      if ("email" in updated) {
+        setProfile(updated as UserProfile);
+      } else if (group) {
+        await loadGroup(group.id, { joinRequests: isAdminRef.current });
+      }
+      await removeAvatar(owner.avatar_path);
+    } catch (err) {
+      if (newPath) await removeAvatar(newPath);
+      setError(err instanceof Error ? err.message : t("avatarUploadFailed"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function clearAvatar(
+    owner: UserProfile | Member,
+    endpoint: string
+  ) {
+    const response = await apiFetch(endpoint, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ avatar_path: null }),
+    });
+    if (!response.ok) throw new Error(await parseError(response));
+    const updated = (await response.json()) as UserProfile | Member;
+    if ("email" in updated) setProfile(updated as UserProfile);
+    else if (group) await loadGroup(group.id, { joinRequests: isAdminRef.current });
+    await removeAvatar(owner.avatar_path);
   }
 
   async function sendGroupMessage(event: FormEvent) {
@@ -1515,6 +1613,12 @@ function App() {
 
   async function removeGuest(guest: Member) {
     if (!group?.game_day || !window.confirm(t("removeGuestConfirm"))) return;
+    if (guest.avatar_path) {
+      await clearAvatar(
+        guest,
+        `/groups/${group.id}/members/${guest.id}/avatar`
+      );
+    }
     await runAction(() =>
       apiFetch(
         `/groups/${group.id}/game-days/${group.game_day!.id}/guests/${guest.id}`,
@@ -1716,14 +1820,31 @@ function App() {
           <p>{authMode === "login" ? t("loginSubtitle") : t("signupSubtitle")}</p>
           {languageToggle}
           {authMode === "signup" && (
-            <label>
-              {t("name")}
-              <input
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                required
-              />
-            </label>
+            <>
+              <label>
+                {t("firstName")}
+                <input
+                  value={signupFirstName}
+                  onChange={(event) => setSignupFirstName(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                {t("lastName")}
+                <input
+                  value={signupLastName}
+                  onChange={(event) => setSignupLastName(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                {t("nicknameOptional")}
+                <input
+                  value={signupNickname}
+                  onChange={(event) => setSignupNickname(event.target.value)}
+                />
+              </label>
+            </>
           )}
           <label>
             {t("email")}
@@ -1796,6 +1917,11 @@ function App() {
   const dayStatisticsRows: StatisticsTableRow[] = dayStats.map((row) => ({
     id: row.member.id,
     name: playerName(row.member),
+    full_name: row.member.full_name,
+    first_name: row.member.first_name,
+    last_name: row.member.last_name,
+    avatar_path: row.member.avatar_path,
+    avatar_version: row.member.avatar_version,
     rating: row.member.rating,
     goalkeeperRating: row.member.goalkeeper_rating,
     gameDays: 0,
@@ -1808,6 +1934,11 @@ function App() {
   const overallStatisticsRows: StatisticsTableRow[] = stats.map((row) => ({
     id: row.id,
     name: row.name,
+    full_name: row.full_name,
+    first_name: row.first_name,
+    last_name: row.last_name,
+    avatar_path: row.avatar_path,
+    avatar_version: row.avatar_version,
     rating: row.rating,
     goalkeeperRating: row.goalkeeper_rating,
     gameDays: row.game_days_played,
@@ -1912,7 +2043,7 @@ function App() {
             onClick={() => {
               setShowProfile((current) => !current);
               setEditingProfile(false);
-              setProfileDraft(profile?.display_name ?? "");
+              populateProfileForm(profile);
               if (profile) setProfileError("");
             }}
           >
@@ -2025,22 +2156,76 @@ function App() {
           {showProfile && (
             <section className="card profile-card">
               <h2>{t("myProfile")}</h2>
+              {profile && (
+                <div className="profile-avatar-editor">
+                  <PlayerAvatar player={{ ...profile, name: profile.display_name }} size="large" />
+                  <div className="form-actions">
+                    <label className="secondary-button file-button">
+                      {t("choosePicture")}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            saveAvatar(
+                              file,
+                              profile,
+                              `users/${profile.id}/`,
+                              "/profile/avatar"
+                            );
+                          }
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                    {profile.avatar_path && (
+                      <button
+                        className="text-danger-button"
+                        onClick={() => clearAvatar(profile, "/profile/avatar")}
+                      >
+                        {t("removePicture")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               {editingProfile ? (
                 <form className="form-panel" onSubmit={saveProfile}>
                   <label>
-                    {t("displayName")}
+                    {t("firstName")}
                     <input
-                      value={profileDraft}
+                      value={profileFirstName}
                       maxLength={80}
-                      onChange={(event) => setProfileDraft(event.target.value)}
+                      onChange={(event) => setProfileFirstName(event.target.value)}
                       required
                     />
                   </label>
+                  <label>
+                    {t("lastName")}
+                    <input
+                      value={profileLastName}
+                      maxLength={80}
+                      onChange={(event) => setProfileLastName(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    {t("nicknameOptional")}
+                    <input
+                      value={profileNickname}
+                      maxLength={80}
+                      onChange={(event) => setProfileNickname(event.target.value)}
+                    />
+                  </label>
+                  <p className="muted-text">
+                    {t("displayedAs")}:{" "}
+                    <strong>{profileNickname.trim() || profileFirstName.trim()}</strong>
+                  </p>
                   <div className="form-actions">
                     <button
                       className="primary-button"
                       type="submit"
-                      disabled={!profileDraft.trim() || profileSaving}
+                      disabled={!profileFirstName.trim() || profileSaving}
                     >
                       {t("save")}
                     </button>
@@ -2049,7 +2234,7 @@ function App() {
                       type="button"
                       onClick={() => {
                         setEditingProfile(false);
-                        setProfileDraft(profile?.display_name ?? "");
+                        populateProfileForm(profile);
                         setProfileError("");
                       }}
                     >
@@ -2060,10 +2245,14 @@ function App() {
               ) : (
                 <div className="profile-details">
                   <div>
-                    <span className="muted-text">{t("displayName")}</span>
-                    <strong>
-                      {profile?.display_name ?? t("loading")}
-                    </strong>
+                    <span className="muted-text">{t("fullName")}</span>
+                    <strong>{profile?.full_name ?? t("loading")}</strong>
+                    <span className="muted-text">
+                      {t("displayedAs")}: {profile?.display_name ?? t("loading")}
+                    </span>
+                    {profile && !profile.is_complete && (
+                      <span className="profile-incomplete">{t("profileIncomplete")}</span>
+                    )}
                   </div>
                   <button
                     className="secondary-button"
@@ -2332,7 +2521,25 @@ function App() {
               <h2>{t("pendingJoinRequests")}</h2>
               {joinRequests.map((request) => (
                 <div className="request-row" key={request.id}>
-                  <strong>{request.user_name}</strong>
+                  <span className="player-identity">
+                    <PlayerAvatar
+                      player={{
+                        name: request.user_name,
+                        full_name: request.user_full_name,
+                        avatar_path: request.avatar_path,
+                        avatar_version: request.avatar_version,
+                      }}
+                    />
+                    <span>
+                      <strong>{request.user_name}</strong>
+                      {request.user_full_name &&
+                        request.user_full_name !== request.user_name && (
+                          <span className="member-full-name">
+                            {request.user_full_name}
+                          </span>
+                        )}
+                    </span>
+                  </span>
                   <div className="request-actions">
                     <button
                       className="primary-button"
@@ -2446,7 +2653,17 @@ function App() {
                       {chatMessages.map((message) => (
                         <div className="chat-message" key={message.id}>
                           <div className="chat-message-meta">
-                            <strong>{message.sender_name}</strong>
+                            <span className="player-identity">
+                              <PlayerAvatar
+                                size="small"
+                                player={{
+                                  name: message.sender_name,
+                                  avatar_path: message.sender_avatar_path,
+                                  avatar_version: message.sender_avatar_version,
+                                }}
+                              />
+                              <strong>{message.sender_name}</strong>
+                            </span>
                             <time dateTime={message.created_at}>
                               {new Date(message.created_at).toLocaleString(
                                 lang === "he" ? "he-IL" : "en-US",
@@ -2942,6 +3159,13 @@ function App() {
                     </div>
                       </form>
                     )}
+                    <input
+                      className="member-search"
+                      type="search"
+                      value={memberSearch}
+                      placeholder={t("searchMembers")}
+                      onChange={(event) => setMemberSearch(event.target.value)}
+                    />
                     <div className="member-list">
                   {sortedGroupMembers.map((member) => {
                     const participant = Boolean(
@@ -2955,7 +3179,16 @@ function App() {
                     return (
                       <div className="member-row" key={member.id}>
                         <div className="member-main">
-                          <strong>{member.name}</strong>
+                          <PlayerAvatar player={member} />
+                          <div>
+                            <strong>{member.name}</strong>
+                            {member.user_id &&
+                              member.full_name &&
+                              member.full_name !== member.name && (
+                                <div className="member-full-name">
+                                  {member.full_name}
+                                </div>
+                              )}
                           <div className="member-details">
                             {t("playerRating")} {member.rating} ·{" "}
                             {t("goalkeeperRating")} {member.goalkeeper_rating}
@@ -2965,8 +3198,45 @@ function App() {
                             {participant && ` · ${t("registered")}`}
                             {waiting && ` · ${t("waiting")}`}
                           </div>
+                          </div>
                         </div>
                         <div className="member-actions">
+                          {isAdmin && member.is_virtual && (
+                            <>
+                              <label className="secondary-button file-button">
+                                {t("picture")}
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    if (file) {
+                                      saveAvatar(
+                                        file,
+                                        member,
+                                        `groups/${group.id}/members/${member.id}/`,
+                                        `/groups/${group.id}/members/${member.id}/avatar`
+                                      );
+                                    }
+                                    event.currentTarget.value = "";
+                                  }}
+                                />
+                              </label>
+                              {member.avatar_path && (
+                                <button
+                                  className="text-danger-button"
+                                  onClick={() =>
+                                    clearAvatar(
+                                      member,
+                                      `/groups/${group.id}/members/${member.id}/avatar`
+                                    )
+                                  }
+                                >
+                                  {t("removePicture")}
+                                </button>
+                              )}
+                            </>
+                          )}
                           {gameDay &&
                             gameDay.status === "upcoming" &&
                             canControl &&
@@ -3013,15 +3283,21 @@ function App() {
                               </button>
                               <button
                                 className="text-danger-button"
-                                onClick={() => {
+                                onClick={async () => {
                                   if (window.confirm(t("deleteConfirm"))) {
+                                    if (member.avatar_path) {
+                                      await clearAvatar(
+                                        member,
+                                        `/groups/${group.id}/members/${member.id}/avatar`
+                                      );
+                                    }
                                     runAction(
                                       () =>
                                         apiFetch(
                                           `/groups/${group.id}/members/${member.id}`,
                                           { method: "DELETE" }
                                         )
-                                    ).then(() =>
+                                    ).then(() => {
                                       setGroup((current) => {
                                         if (!current) return current;
                                         return {
@@ -3043,8 +3319,8 @@ function App() {
                                               }
                                             : null,
                                         };
-                                      })
-                                    );
+                                      });
+                                    });
                                   }
                                 }}
                               >
@@ -3069,11 +3345,31 @@ function App() {
                       <h3>{t("registeredPlayers")}</h3>
                       {gameDay.participants.map((player, index) => (
                         <div className="member-row" key={player.id}>
-                          <span>
+                          <span className="player-identity">
+                            <PlayerAvatar player={player} size="small" />
                             {index + 1}. {playerName(player)}
                           </span>
                           {isAdmin && player.is_guest && (
                             <div className="member-actions">
+                              <label className="secondary-button file-button">
+                                {t("picture")}
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    if (file) {
+                                      saveAvatar(
+                                        file,
+                                        player,
+                                        `groups/${group.id}/members/${player.id}/`,
+                                        `/groups/${group.id}/members/${player.id}/avatar`
+                                      );
+                                    }
+                                    event.currentTarget.value = "";
+                                  }}
+                                />
+                              </label>
                               <button
                                 className="secondary-button"
                                 onClick={() => startEditGuest(player)}
@@ -3094,7 +3390,8 @@ function App() {
                     <div>
                       <h3>{t("waitingList")}</h3>
                       {gameDay.waiting_list.map((player, index) => (
-                        <p key={player.id}>
+                        <p className="player-identity" key={player.id}>
+                          <PlayerAvatar player={player} size="small" />
                           {index + 1}. {playerName(player)}
                         </p>
                       ))}
@@ -3246,13 +3543,16 @@ function App() {
                               </select>
                             </div>
                           ) : (
-                            <p key={player.id}>
-                              {playerName(player)} ({playerRatings(player)})
+                            <p className="player-identity" key={player.id}>
+                              <PlayerAvatar player={player} size="small" />
+                              <span>
+                                {playerName(player)} ({playerRatings(player)})
                               {player.id === team.captain_id && (
                                 <span className="captain-badge">
                                   {t("captain")}
                                 </span>
                               )}
+                              </span>
                             </p>
                           )
                         )}
@@ -3289,8 +3589,11 @@ function App() {
                               </select>
                             </div>
                           ) : (
-                            <p key={player.id}>
-                              {playerName(player)} ({playerRatings(player)})
+                            <p className="player-identity" key={player.id}>
+                              <PlayerAvatar player={player} size="small" />
+                              <span>
+                                {playerName(player)} ({playerRatings(player)})
+                              </span>
                             </p>
                           )
                         )}
@@ -3550,6 +3853,7 @@ function App() {
                       return (
                         <div className="match-lineup-row" key={player.id}>
                           <div className="match-lineup-row-main">
+                            <PlayerAvatar player={player} size="small" />
                             <span className="match-lineup-name">
                               {playerName(player)}
                             </span>
@@ -3587,6 +3891,7 @@ function App() {
                       return (
                         <div className="match-lineup-row" key={player.id}>
                           <div className="match-lineup-row-main">
+                            <PlayerAvatar player={player} size="small" />
                             <span className="match-lineup-name">
                               {playerName(player)}
                             </span>
@@ -3676,11 +3981,16 @@ function App() {
                               </button>
                             )}
                             {match.goals.map((goal) => (
-                              <p key={goal.id}>
+                              <p className="goal-player-line" key={goal.id}>
                                 {currentTeamLabel(goal.team_name)}:{" "}
-                                {goal.scorer
-                                  ? playerName(goal.scorer)
-                                  : t("unknownScorer")}
+                                {goal.scorer ? (
+                                  <span className="player-identity">
+                                    <PlayerAvatar player={goal.scorer} size="small" />
+                                    {playerName(goal.scorer)}
+                                  </span>
+                                ) : (
+                                  t("unknownScorer")
+                                )}
                                 {goal.assist
                                   ? ` (${playerName(goal.assist)})`
                                   : ""}
@@ -3952,11 +4262,14 @@ function App() {
                           )}
                         </h2>
                         {finishedGameDay.awards.champions.length > 0 && (
-                          <p className="champion-squad">
-                            {finishedGameDay.awards.champions
-                              .map((item) => item.name)
-                              .join(" · ")}
-                          </p>
+                          <div className="champion-squad player-list-inline">
+                            {finishedGameDay.awards.champions.map((item) => (
+                              <span className="player-identity" key={item.id}>
+                                <PlayerAvatar player={item} size="small" />
+                                {item.name}
+                              </span>
+                            ))}
+                          </div>
                         )}
                       </>
                     )}
@@ -3964,15 +4277,18 @@ function App() {
                     standingsTable(finishedGameDay.standings, finishedTeamNames)
                   )}
                   {finishedGameDay.mvp_announced ? (
-                    <p>
+                    <div className="player-list-inline">
                       {finishedGameDay.awards.mvps.length > 1
                         ? t("coMvps")
                         : t("mvpAnnounced")}
                       :{" "}
-                      {finishedGameDay.awards.mvps
-                        .map((item) => item.name)
-                        .join(", ")}
-                    </p>
+                      {finishedGameDay.awards.mvps.map((item) => (
+                        <span className="player-identity" key={item.id}>
+                          <PlayerAvatar player={item} size="small" />
+                          {item.name}
+                        </span>
+                      ))}
+                    </div>
                   ) : (
                     <>
                       <h2>{t("mvpVoting")}</h2>
@@ -4057,7 +4373,10 @@ function App() {
                       <div className="survey-list">
                         {surveyEligibleMembers.map((member) => (
                           <div className="survey-row" key={member.id}>
-                            <span className="survey-name">{member.name}</span>
+                            <span className="survey-name player-identity">
+                              <PlayerAvatar player={member} />
+                              {member.name}
+                            </span>
                             <div className="survey-ratings">
                               <div className="survey-rating-field">
                                 <span>{t("playerRating")}</span>
@@ -4166,25 +4485,27 @@ function App() {
               {group.history.length > 0 && (
                 <section className="card group-page-only">
                   <h2>{t("history")}</h2>
-                  {group.history.map((item) => {
-                    const squads = championSquads(item.awards.champions);
-                    return (
-                      <p key={item.id}>
+                  {group.history.map((item) => (
+                    <div className="history-profile-row" key={item.id}>
+                      <p>
                         {new Date(item.game_datetime).toLocaleString()}
-                        {squads.map(
-                          (squad, index) =>
-                            ` · ${t("championPlayers")}${
-                              squads.length > 1 ? ` ${index + 1}` : ""
-                            }: ${squad.join(", ")}`
-                        )}
-                        {item.awards.mvps.length
-                          ? ` · ${t("mvpAnnounced")}: ${item.awards.mvps
-                              .map((mvp) => mvp.name)
-                              .join(", ")}`
-                          : ""}
                       </p>
-                    );
-                  })}
+                      <div className="player-list-inline">
+                        {item.awards.champions.map((player) => (
+                          <span className="player-identity" key={`champion-${player.id}`}>
+                            <PlayerAvatar player={player} size="small" />
+                            {t("championPlayers")}: {player.name}
+                          </span>
+                        ))}
+                        {item.awards.mvps.map((player) => (
+                          <span className="player-identity" key={`mvp-${player.id}`}>
+                            <PlayerAvatar player={player} size="small" />
+                            {t("mvpAnnounced")}: {player.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </section>
               )}
             </>

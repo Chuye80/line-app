@@ -41,6 +41,11 @@ class Profile(Base):
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    first_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nickname: Mapped[str | None] = mapped_column(Text, nullable=True)
+    avatar_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    avatar_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = created_at_col()
 
 
@@ -91,6 +96,8 @@ class Membership(Base):
         nullable=True,
     )
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    avatar_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    avatar_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     rating: Mapped[Decimal] = mapped_column(Numeric(3, 1), nullable=False, default=Decimal("3.0"))
     goalkeeper_rating: Mapped[Decimal] = mapped_column(
         Numeric(3, 1),

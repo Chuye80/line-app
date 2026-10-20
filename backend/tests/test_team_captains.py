@@ -69,7 +69,11 @@ def create_user(sql, name: str) -> uuid.UUID:
     with sql.cursor() as cur:
         cur.execute(
             "INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES (%s, %s, %s)",
-            (str(user_id), f"{user_id}@example.test", json.dumps({"display_name": name})),
+            (
+                str(user_id),
+                f"{user_id}@example.test",
+                json.dumps({"first_name": name, "last_name": "Test"}),
+            ),
         )
     return user_id
 
