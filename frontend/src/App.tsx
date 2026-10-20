@@ -5,11 +5,8 @@ import "./App.css";
 import { supabase } from "./supabase";
 import { translations, type Language } from "./i18n";
 import { championLabel, teamDisplayNames, teamLabel } from "./teamNames";
-import {
-  PlayerAvatar,
-  removeAvatar,
-  uploadAvatar,
-} from "./PlayerAvatar";
+import { PlayerAvatar } from "./PlayerAvatar";
+import { removeAvatar, uploadAvatar } from "./avatarStorage";
 import { matchesMemberSearch } from "./profileUtils";
 
 const API_URL =
