@@ -1561,7 +1561,96 @@ button:disabled {
 }
 
 .app-header-title {
+  position: relative;
   min-width: 0;
+}
+
+.group-switch-button {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #374151;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.group-switch-button span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-switch-caret {
+  flex: 0 0 auto;
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.group-switch-menu {
+  position: absolute;
+  z-index: 40;
+  inset-block-start: calc(100% + 8px);
+  inset-inline-start: 0;
+  display: flex;
+  width: min(280px, calc(100vw - 32px));
+  max-height: min(70vh, 420px);
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.group-switch-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: white;
+  color: #111827;
+  text-align: start;
+}
+
+.group-switch-option span {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.group-switch-option.active {
+  border-color: #111827;
+  background: #f3f4f6;
+}
+
+.group-switch-create {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.group-switch-create input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+}
+
+.registration-available {
+  margin-top: 16px;
 }
 
 .app-header h1 {
