@@ -4995,20 +4995,36 @@ function App() {
                       <p>
                         {new Date(item.game_datetime).toLocaleString()}
                       </p>
-                      <div className="player-list-inline">
-                        {item.awards.champions.map((player) => (
-                          <span className="player-identity" key={`champion-${player.id}`}>
-                            <PlayerAvatar player={player} size="small" />
-                            {t("championPlayers")}: {player.name}
-                          </span>
-                        ))}
-                        {item.awards.mvps.map((player) => (
-                          <span className="player-identity" key={`mvp-${player.id}`}>
-                            <PlayerAvatar player={player} size="small" />
-                            {t("mvpAnnounced")}: {player.name}
-                          </span>
-                        ))}
-                      </div>
+                      {item.awards.champions.length > 0 && (
+                        <div className="history-award">
+                          <p className="history-award-label">
+                            🏆 {t("championPlayers")}
+                          </p>
+                          <div className="history-award-players">
+                            {item.awards.champions.map((player) => (
+                              <span className="player-identity" key={`champion-${player.id}`}>
+                                <PlayerAvatar player={player} size="small" />
+                                {player.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {item.awards.mvps.length > 0 && (
+                        <div className="history-award">
+                          <p className="history-award-label">
+                            ⭐ {t("mvpAnnounced")}
+                          </p>
+                          <div className="history-award-players">
+                            {item.awards.mvps.map((player) => (
+                              <span className="player-identity" key={`mvp-${player.id}`}>
+                                <PlayerAvatar player={player} size="small" />
+                                {player.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </section>
