@@ -5,7 +5,8 @@ import "./App.css";
 import { supabase } from "./supabase";
 import { translations, type Language } from "./i18n";
 import { championLabel, teamDisplayNames, teamLabel } from "./teamNames";
-import { PlayerAvatar } from "./PlayerAvatar";
+import { PlayerAvatar, ReigningTitlesProvider } from "./PlayerAvatar";
+import { reigningTitles } from "./reigningTitles";
 import { removeAvatar, uploadAvatar } from "./avatarStorage";
 import { matchesMemberSearch } from "./profileUtils";
 import {
@@ -653,6 +654,10 @@ function App() {
       group?.members.find((member) => member.id === membership?.membership_id) ??
       null,
     [group, membership?.membership_id]
+  );
+  const titles = useMemo(
+    () => reigningTitles(group?.history ?? []),
+    [group?.history]
   );
   const otherRealMembers =
     group?.members.filter(
@@ -2269,6 +2274,7 @@ function App() {
   );
 
   return (
+    <ReigningTitlesProvider titles={titles}>
     <div className="app">
       <header className="header app-header">
         <div className="app-header-title" ref={groupMenuRef}>
@@ -2341,6 +2347,8 @@ function App() {
         >
           <PlayerAvatar
             player={{
+              id: profile?.id,
+              user_id: profile?.id,
               name: profile?.display_name ?? session.user.email ?? t("myProfile"),
               full_name: profile?.full_name,
               first_name: profile?.first_name,
@@ -3173,6 +3181,8 @@ function App() {
                               <PlayerAvatar
                                 size="small"
                                 player={{
+                                  id: message.sender_user_id,
+                                  user_id: message.sender_user_id,
                                   name: message.sender_name,
                                   avatar_path: message.sender_avatar_path,
                                   avatar_version: message.sender_avatar_version,
@@ -5125,6 +5135,7 @@ function App() {
         ))}
       </nav>
     </div>
+    </ReigningTitlesProvider>
   );
 }
 
