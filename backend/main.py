@@ -521,7 +521,7 @@ def clear_teams(db: Session, game_day: GameDay) -> None:
 
 
 def locked_game_day_or_404(db: Session, group: Group, game_day_id: UUID) -> GameDay:
-    """Row-locks the game day so captain, team and finish changes serialize."""
+    """Row-locks the game day so registration, promotion, captain, team and finish changes serialize."""
     game_day = (
         db.query(GameDay)
         .filter(GameDay.id == game_day_id, GameDay.group_id == group.id)
@@ -531,6 +531,11 @@ def locked_game_day_or_404(db: Session, group: Group, game_day_id: UUID) -> Game
     if game_day is None:
         raise HTTPException(status_code=404, detail="Game Day not found")
     return game_day
+
+
+def lock_game_day_row(db: Session, game_day: GameDay) -> GameDay:
+    """Row-lock a game day that is already known to exist."""
+    return db.query(GameDay).filter(GameDay.id == game_day.id).with_for_update().one()
 
 
 def require_not_finished(game_day: GameDay, detail: str) -> None:
@@ -559,10 +564,18 @@ def team_captain_names_snapshot(db: Session, game_day: GameDay) -> dict[str, str
 
 
 def promote_waiting_players(db: Session, game_day: GameDay) -> None:
+    """Fill open spots from the waiting list while the game-day row is locked.
+
+    Callers that free a spot must call this before committing that removal.
+    The lock then stops a concurrent registration from taking the same spot.
+    """
+    locked = lock_game_day_row(db, game_day)
+    db.flush()
+    db.expire(locked, ["registrations"])
     changed = False
 
-    while len(participant_registrations(game_day)) < game_day.participant_count:
-        waiting = waiting_registrations(game_day)
+    while len(participant_registrations(locked)) < locked.participant_count:
+        waiting = waiting_registrations(locked)
         if not waiting:
             break
 
@@ -570,7 +583,7 @@ def promote_waiting_players(db: Session, game_day: GameDay) -> None:
             (
                 item
                 for item in waiting
-                if can_take_game_spot(game_day, item.membership)
+                if can_take_game_spot(locked, item.membership)
             ),
             None,
         )
@@ -581,7 +594,7 @@ def promote_waiting_players(db: Session, game_day: GameDay) -> None:
         changed = True
 
     if changed:
-        clear_teams(db, game_day)
+        clear_teams(db, locked)
         db.commit()
 
 
@@ -1936,6 +1949,7 @@ def leave_group(
     ensure_not_last_admin(db, membership)
     game_day = current_game_day(db, group)
     if game_day:
+        game_day = lock_game_day_row(db, game_day)
         registration = (
             db.query(Registration)
             .filter(
@@ -1948,9 +1962,9 @@ def leave_group(
             db.delete(registration)
         clear_teams(db, game_day)
     db.delete(membership)
-    db.commit()
     if game_day:
         promote_waiting_players(db, game_day)
+    db.commit()
     return {"message": "Left group successfully"}
 
 
@@ -1982,6 +1996,7 @@ def transfer_admin_and_leave(
     target.is_admin = True
     game_day = current_game_day(db, group)
     if game_day:
+        game_day = lock_game_day_row(db, game_day)
         registration = (
             db.query(Registration)
             .filter(
@@ -1994,9 +2009,9 @@ def transfer_admin_and_leave(
             db.delete(registration)
         clear_teams(db, game_day)
     db.delete(membership)
-    db.commit()
     if game_day:
         promote_waiting_players(db, game_day)
+    db.commit()
     return {"message": "Admin role transferred and group left successfully"}
 
 
@@ -2161,6 +2176,7 @@ def delete_member(
     ensure_not_last_admin(db, membership)
     game_day = current_game_day(db, group)
     if game_day:
+        game_day = lock_game_day_row(db, game_day)
         registration = (
             db.query(Registration)
             .filter(
@@ -2173,9 +2189,9 @@ def delete_member(
             db.delete(registration)
         clear_teams(db, game_day)
     db.delete(membership)
-    db.commit()
     if game_day:
         promote_waiting_players(db, game_day)
+    db.commit()
     return {"message": "Member deleted"}
 
 
@@ -2255,9 +2271,9 @@ def register_member(
 ):
     group = get_group_or_404(db, group_id)
     caller = require_membership(db, group, user)
-    game_day = db.get(GameDay, game_day_id)
-    if game_day is None or game_day.group_id != group.id:
-        raise HTTPException(status_code=404, detail="Game Day not found")
+    # Lock before the capacity count. Overlapping requests then take the
+    # participant spots one at a time instead of all reading the same free count.
+    game_day = locked_game_day_or_404(db, group, game_day_id)
     if game_day.status == "finished":
         raise HTTPException(status_code=400, detail="This Game Day is finished")
     target = db.get(Membership, membership_id)
@@ -2278,7 +2294,9 @@ def register_member(
         .first()
     )
     if existing:
+        db.rollback()
         return slim_game_day_dict(db, game_day, caller)
+    db.expire(game_day, ["registrations"])
     status = registration_status_for(db, game_day, target)
     db.add(Registration(game_day_id=game_day.id, membership_id=target.id, status=status))
     clear_teams(db, game_day)
@@ -2298,9 +2316,7 @@ def unregister_member(
     caller = require_membership(db, group, user)
     if membership_id != caller.id and not caller.is_admin:
         raise HTTPException(status_code=403, detail="Admin permission required")
-    game_day = db.get(GameDay, game_day_id)
-    if game_day is None or game_day.group_id != group.id:
-        raise HTTPException(status_code=404, detail="Game Day not found")
+    game_day = locked_game_day_or_404(db, group, game_day_id)
     registration = (
         db.query(Registration)
         .filter(
@@ -2312,8 +2328,8 @@ def unregister_member(
     if registration:
         db.delete(registration)
         clear_teams(db, game_day)
-        db.commit()
         promote_waiting_players(db, game_day)
+    db.commit()
     return slim_game_day_dict(db, game_day, caller)
 
 
@@ -2346,6 +2362,9 @@ def create_guest(
     if game_day is None or game_day.group_id != group.id:
         raise HTTPException(status_code=404, detail="Game Day not found")
     game_day = sync_game_day_status(db, game_day)
+    if game_day.status != "upcoming":
+        raise HTTPException(status_code=400, detail="Guests can only be added before kickoff")
+    game_day = locked_game_day_or_404(db, group, game_day_id)
     if game_day.status != "upcoming":
         raise HTTPException(status_code=400, detail="Guests can only be added before kickoff")
     if participant_count_db(db, game_day.id) >= game_day.participant_count:
@@ -2429,10 +2448,13 @@ def delete_guest(
         raise HTTPException(status_code=400, detail="Guests can only be removed before kickoff")
     if guest is None or guest.game_day_id != game_day.id:
         raise HTTPException(status_code=404, detail="Guest not found")
+    game_day = locked_game_day_or_404(db, group, game_day_id)
+    if game_day.status != "upcoming":
+        raise HTTPException(status_code=400, detail="Guests can only be removed before kickoff")
     db.delete(guest)
     clear_teams(db, game_day)
-    db.commit()
     promote_waiting_players(db, game_day)
+    db.commit()
     caller = membership_for_user(db, group.id, user.id)
     return slim_game_day_dict(db, game_day, caller)
 
