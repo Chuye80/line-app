@@ -577,6 +577,8 @@ function App() {
   const [statsScope, setStatsScope] = useState<"day" | "overall">("overall");
 
   const [newGroupName, setNewGroupName] = useState("");
+  const [groupMenuOpen, setGroupMenuOpen] = useState(false);
+  const groupMenuRef = useRef<HTMLDivElement | null>(null);
   const [chatExpanded, setChatExpanded] = useState(true);
   const [chatMessages, setChatMessages] = useState<GroupMessage[]>([]);
   const [chatDraft, setChatDraft] = useState("");
@@ -1335,6 +1337,24 @@ function App() {
   }, [section, gamePane, groupPane]);
 
   useEffect(() => {
+    if (!groupMenuOpen) return;
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (!groupMenuRef.current?.contains(event.target as Node)) {
+        setGroupMenuOpen(false);
+      }
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setGroupMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [groupMenuOpen]);
+
+  useEffect(() => {
     if (invitePreview?.state === "member") {
       setSelectedGroupId(invitePreview.id);
     }
@@ -1395,6 +1415,28 @@ function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function selectGroup(groupId: string) {
+    if (!session) return;
+    localStorage.setItem(selectedGroupKey(session.user.id), groupId);
+    updateGroupUrl(groupId);
+    setSelectedGroupId(groupId);
+    setGroupMenuOpen(false);
+  }
+
+  function setGameDayRegistration(memberId: string, join: boolean) {
+    if (!group?.game_day) return;
+    return runAction(
+      () =>
+        apiFetch(
+          `/groups/${group.id}/game-days/${group.game_day!.id}/${
+            join ? "register" : "unregister"
+          }/${memberId}`,
+          { method: "POST" }
+        ),
+      "silent"
+    );
   }
 
   async function createGroup() {
@@ -2044,9 +2086,63 @@ function App() {
   return (
     <div className="app">
       <header className="header app-header">
-        <div className="app-header-title">
+        <div className="app-header-title" ref={groupMenuRef}>
           <h1>⚽ {t("appName")}</h1>
-          {group && isMember && <p>{group.name}</p>}
+          <button
+            type="button"
+            className="group-switch-button"
+            aria-expanded={groupMenuOpen}
+            aria-haspopup="menu"
+            onClick={() => setGroupMenuOpen((current) => !current)}
+          >
+            <span>{group && isMember ? group.name : t("myGroups")}</span>
+            <span className="group-switch-caret" aria-hidden="true">
+              ▼
+            </span>
+          </button>
+          {groupMenuOpen && (
+            <div className="group-switch-menu" role="menu">
+              {myGroups.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={selectedGroupId === item.id}
+                  className={
+                    selectedGroupId === item.id
+                      ? "group-switch-option active"
+                      : "group-switch-option"
+                  }
+                  onClick={() => selectGroup(item.id)}
+                >
+                  <strong>{item.name}</strong>
+                  <span>{item.is_admin ? t("admin") : t("member")}</span>
+                </button>
+              ))}
+              <form
+                className="group-switch-create"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setGroupMenuOpen(false);
+                  createGroup();
+                }}
+              >
+                <input
+                  placeholder={t("newGroupName")}
+                  aria-label={t("newGroupName")}
+                  value={newGroupName}
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                />
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={!newGroupName.trim()}
+                >
+                  + {t("createGroup")}
+                </button>
+              </form>
+            </div>
+          )}
         </div>
         <button
           type="button"
@@ -2348,9 +2444,9 @@ function App() {
                   <p>{t("chooseGroup")}</p>
                   <button
                     className="primary-button"
-                    onClick={() => openSection("settings")}
+                    onClick={() => setGroupMenuOpen(true)}
                   >
-                    {t("openProfile")}
+                    {t("myGroups")}
                   </button>
                 </>
               ) : (
@@ -2497,14 +2593,7 @@ function App() {
                   className={
                     selectedGroupId === item.id ? "group-chip active" : "group-chip"
                   }
-                  onClick={() => {
-                    localStorage.setItem(
-                      selectedGroupKey(session.user.id),
-                      item.id
-                    );
-                    updateGroupUrl(item.id);
-                    setSelectedGroupId(item.id);
-                  }}
+                  onClick={() => selectGroup(item.id)}
                 >
                   <strong>{item.name}</strong>
                   <span>{item.is_admin ? t("admin") : t("member")}</span>
@@ -2833,8 +2922,8 @@ function App() {
           {section !== "home" && section !== "settings" && !(group && isMember) && (
             <section className="card">
               <p>{t("chooseGroup")}</p>
-              <button className="primary-button" onClick={() => openSection("settings")}>
-                {t("openProfile")}
+              <button className="primary-button" onClick={() => setGroupMenuOpen(true)}>
+                {t("myGroups")}
               </button>
             </section>
           )}
@@ -3368,14 +3457,6 @@ function App() {
                     />
                     <div className="member-list">
                   {sortedGroupMembers.map((member) => {
-                    const participant = Boolean(
-                      gameDay?.participants.some((item) => item.id === member.id)
-                    );
-                    const waiting = Boolean(
-                      gameDay?.waiting_list.some((item) => item.id === member.id)
-                    );
-                    const canControl =
-                      isAdmin || currentMembership?.id === member.id;
                     return (
                       <div className="member-row" key={member.id}>
                         <div className="member-main">
@@ -3395,8 +3476,6 @@ function App() {
                             {member.is_subscriber && ` · ${t("subscriber")}`}
                             {member.is_admin && ` · ${t("admin")}`}
                             {member.is_virtual && ` · ${t("virtual")}`}
-                            {participant && ` · ${t("registered")}`}
-                            {waiting && ` · ${t("waiting")}`}
                           </div>
                           </div>
                         </div>
@@ -3437,42 +3516,6 @@ function App() {
                               )}
                             </>
                           )}
-                          {gameDay &&
-                            gameDay.status === "upcoming" &&
-                            canControl &&
-                            (participant || waiting ? (
-                              <button
-                                className="secondary-button"
-                                onClick={() =>
-                                  runAction(
-                                    () =>
-                                      apiFetch(
-                                        `/groups/${group.id}/game-days/${gameDay.id}/unregister/${member.id}`,
-                                        { method: "POST" }
-                                      ),
-                                    "silent"
-                                  )
-                                }
-                              >
-                                {t("leaveGameDay")}
-                              </button>
-                            ) : (
-                              <button
-                                className="secondary-button"
-                                onClick={() =>
-                                  runAction(
-                                    () =>
-                                      apiFetch(
-                                        `/groups/${group.id}/game-days/${gameDay.id}/register/${member.id}`,
-                                        { method: "POST" }
-                                      ),
-                                    "silent"
-                                  )
-                                }
-                              >
-                                {t("register")}
-                              </button>
-                            ))}
                           {isAdmin && (
                             <>
                               <button
@@ -3544,6 +3587,27 @@ function App() {
                 gameDay.status === "upcoming" && (
                 <section className="card group-page-only">
                   <h2>{t("gameRegistration")}</h2>
+                  {currentMembership && (
+                    <div className="form-actions">
+                      <button
+                        className={
+                          registrationState === "out"
+                            ? "primary-button"
+                            : "secondary-button"
+                        }
+                        onClick={() =>
+                          setGameDayRegistration(
+                            currentMembership.id,
+                            registrationState === "out"
+                          )
+                        }
+                      >
+                        {registrationState === "out"
+                          ? t("register")
+                          : t("leaveGameDay")}
+                      </button>
+                    </div>
+                  )}
                   <div className="registration-columns">
                     <div>
                       <h3>{t("registeredPlayers")}</h3>
@@ -3553,54 +3617,134 @@ function App() {
                             <PlayerAvatar player={player} size="small" />
                             {index + 1}. {playerName(player)}
                           </span>
-                          {isAdmin && player.is_guest && (
+                          {(isAdmin && player.is_guest) ||
+                          (isAdmin && player.id !== currentMembership?.id) ? (
                             <div className="member-actions">
-                              <label className="secondary-button file-button">
-                                {t("picture")}
-                                <input
-                                  type="file"
-                                  accept="image/jpeg,image/png,image/webp"
-                                  onChange={(event) => {
-                                    const file = event.target.files?.[0];
-                                    if (file) {
-                                      saveAvatar(
-                                        file,
-                                        player,
-                                        `groups/${group.id}/members/${player.id}/`,
-                                        `/groups/${group.id}/members/${player.id}/avatar`
-                                      );
-                                    }
-                                    event.currentTarget.value = "";
-                                  }}
-                                />
-                              </label>
-                              <button
-                                className="secondary-button"
-                                onClick={() => startEditGuest(player)}
-                              >
-                                {t("editMember")}
-                              </button>
-                              <button
-                                className="text-danger-button"
-                                onClick={() => removeGuest(player)}
-                              >
-                                {t("removeGuest")}
-                              </button>
+                              {isAdmin && !player.is_guest && (
+                                <button
+                                  className="secondary-button"
+                                  onClick={() =>
+                                    setGameDayRegistration(player.id, false)
+                                  }
+                                >
+                                  {t("leaveGameDay")}
+                                </button>
+                              )}
+                              {isAdmin && player.is_guest && (
+                                <>
+                                  <label className="secondary-button file-button">
+                                    {t("picture")}
+                                    <input
+                                      type="file"
+                                      accept="image/jpeg,image/png,image/webp"
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0];
+                                        if (file) {
+                                          saveAvatar(
+                                            file,
+                                            player,
+                                            `groups/${group.id}/members/${player.id}/`,
+                                            `/groups/${group.id}/members/${player.id}/avatar`
+                                          );
+                                        }
+                                        event.currentTarget.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                  <button
+                                    className="secondary-button"
+                                    onClick={() => startEditGuest(player)}
+                                  >
+                                    {t("editMember")}
+                                  </button>
+                                  <button
+                                    className="text-danger-button"
+                                    onClick={() => removeGuest(player)}
+                                  >
+                                    {t("removeGuest")}
+                                  </button>
+                                </>
+                              )}
                             </div>
-                          )}
+                          ) : null}
                         </div>
                       ))}
                     </div>
                     <div>
                       <h3>{t("waitingList")}</h3>
                       {gameDay.waiting_list.map((player, index) => (
-                        <p className="player-identity" key={player.id}>
-                          <PlayerAvatar player={player} size="small" />
-                          {index + 1}. {playerName(player)}
-                        </p>
+                        <div className="member-row" key={player.id}>
+                          <span className="player-identity">
+                            <PlayerAvatar player={player} size="small" />
+                            {index + 1}. {playerName(player)}
+                          </span>
+                          {isAdmin && player.id !== currentMembership?.id && (
+                            <div className="member-actions">
+                              {player.is_guest ? (
+                                <button
+                                  className="text-danger-button"
+                                  onClick={() => removeGuest(player)}
+                                >
+                                  {t("removeGuest")}
+                                </button>
+                              ) : (
+                                <button
+                                  className="secondary-button"
+                                  onClick={() =>
+                                    setGameDayRegistration(player.id, false)
+                                  }
+                                >
+                                  {t("leaveGameDay")}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
                   </div>
+                  {isAdmin &&
+                    group.members.some(
+                      (member) =>
+                        member.id !== currentMembership?.id &&
+                        !gameDay.participants.some(
+                          (player) => player.id === member.id
+                        ) &&
+                        !gameDay.waiting_list.some(
+                          (player) => player.id === member.id
+                        )
+                    ) && (
+                    <div className="registration-available">
+                      <h3>{t("notRegistered")}</h3>
+                      {group.members
+                        .filter(
+                          (member) =>
+                            member.id !== currentMembership?.id &&
+                            !gameDay.participants.some(
+                              (player) => player.id === member.id
+                            ) &&
+                            !gameDay.waiting_list.some(
+                              (player) => player.id === member.id
+                            )
+                        )
+                        .map((member) => (
+                          <div className="member-row" key={member.id}>
+                            <span className="player-identity">
+                              <PlayerAvatar player={member} size="small" />
+                              {member.name}
+                            </span>
+                            <button
+                              className="secondary-button"
+                              onClick={() =>
+                                setGameDayRegistration(member.id, true)
+                              }
+                            >
+                              {t("register")}
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </section>
               )}
 
