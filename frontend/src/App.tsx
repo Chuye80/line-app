@@ -11,6 +11,7 @@ import { removeAvatar, uploadAvatar } from "./avatarStorage";
 import { matchesMemberSearch } from "./profileUtils";
 import {
   gameDayGuide,
+  registrationGenerateCta,
   guideActionLabel,
   guideBarLabel,
   guideDetailLabel,
@@ -2029,6 +2030,12 @@ function App() {
     selfNeedsRegistration: registrationState === "out",
     pane: gamePane,
   });
+  const registrationCta = gameDay
+    ? registrationGenerateCta(guide, {
+        registered: gameDay.participants.length,
+        capacity: gameDay.participant_count,
+      })
+    : null;
   const registrationReady = Boolean(
     gameDay &&
       gameDay.participant_count > 0 &&
@@ -3920,6 +3927,24 @@ function App() {
                             </button>
                           </div>
                         ))}
+                    </div>
+                  )}
+                  {registrationCta && (
+                    <div className="registration-generate">
+                      <p className="registration-ready-note">
+                        <bdi>
+                          {registrationCta.registered}/{registrationCta.capacity}
+                        </bdi>
+                        <span>{t("playersReady")}</span>
+                        <span aria-hidden="true">✓</span>
+                      </p>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={() => void generateCurrentTeams()}
+                      >
+                        {t("generateTeams")}
+                      </button>
                     </div>
                   )}
                 </section>

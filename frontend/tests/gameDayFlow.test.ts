@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   gameDayGuide,
+  registrationGenerateCta,
   guideActionLabel,
   guideBarLabel,
   guideDetailLabel,
@@ -322,6 +323,71 @@ test("guide copy exists in English and Hebrew", () => {
     assert.equal(typeof translations.en[key], "string", key);
     assert.equal(typeof translations.he[key], "string", key);
   }
+});
+
+test("bottom registration CTA follows team generation and the configured capacity", () => {
+  const ready = gameDayGuide(
+    input({
+      isAdmin: true,
+      selfNeedsRegistration: false,
+      participantCount: 8,
+      registeredCount: 8,
+      teamCount: 0,
+      pane: "registration",
+    })
+  );
+  assert.deepEqual(
+    registrationGenerateCta(ready, { registered: 8, capacity: 8 }),
+    { registered: 8, capacity: 8 }
+  );
+
+  const generated = gameDayGuide(
+    input({
+      isAdmin: true,
+      selfNeedsRegistration: false,
+      participantCount: 8,
+      registeredCount: 8,
+      teamCount: 2,
+      pane: "registration",
+    })
+  );
+  assert.equal(
+    registrationGenerateCta(generated, { registered: 8, capacity: 8 }),
+    null
+  );
+
+  const short = gameDayGuide(
+    input({
+      isAdmin: true,
+      selfNeedsRegistration: false,
+      participantCount: 8,
+      registeredCount: 7,
+      pane: "registration",
+    })
+  );
+  assert.equal(
+    registrationGenerateCta(short, { registered: 7, capacity: 8 }),
+    null
+  );
+
+  const member = gameDayGuide(
+    input({
+      isAdmin: false,
+      selfNeedsRegistration: false,
+      participantCount: 8,
+      registeredCount: 8,
+      pane: "registration",
+    })
+  );
+  assert.equal(
+    registrationGenerateCta(member, { registered: 8, capacity: 8 }),
+    null
+  );
+
+  assert.equal(translations.en.playersReady.includes("12"), false);
+  assert.equal(translations.he.playersReady.includes("12"), false);
+  assert.equal(translations.en.playersReady, "players ready");
+  assert.equal(translations.he.playersReady, "שחקנים מוכנים");
 });
 
 test("a live day with incomplete registration does not pretend registration is still open", () => {

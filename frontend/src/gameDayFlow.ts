@@ -125,6 +125,15 @@ export function guideDetailLabel(detail: FlowDetail) {
   return detailLabel[detail];
 }
 
+/** Bottom registration CTA uses the same offer as the top workflow action. */
+export function registrationGenerateCta(
+  guide: GameDayGuide,
+  counts: { registered: number; capacity: number }
+): { registered: number; capacity: number } | null {
+  if (!guide.actions.includes("generateTeams")) return null;
+  return { registered: counts.registered, capacity: counts.capacity };
+}
+
 export function shouldRemindMvpVote(input: {
   mvpOpen: boolean;
   viewerCanVote: boolean;
