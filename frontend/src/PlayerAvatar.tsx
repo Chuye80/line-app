@@ -88,7 +88,14 @@ export function PlayerAvatar({
   const failed = failedKey === avatarKey;
   return (
     <span
-      className={`player-avatar player-avatar-${size}`}
+      className={[
+        "player-avatar",
+        `player-avatar-${size}`,
+        champion ? "player-avatar-champion" : "",
+        mvp ? "player-avatar-mvp" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       aria-label={label}
       title={label}
     >

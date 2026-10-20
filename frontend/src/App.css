@@ -124,28 +124,69 @@ button:disabled {
   user-select: none;
 }
 
-/* The frame artwork's clear opening is about 58% of the image, so 172%
-   sits the ring on the photo without covering the face. */
+/* The wreath's clear opening is centered slightly above the image middle
+   and is about 62% of the artwork width, so 158% rings the photo at full size. */
 .player-avatar-frame {
   z-index: 1;
   left: 50%;
   top: 50%;
-  width: 172%;
-  height: 172%;
+  width: 158%;
+  height: auto;
   max-width: none;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -45.8%);
 }
 
-/* Crown height is ~78% of its width. -42% keeps the overflow inside the
-   padding of the smallest avatar rows, with a slight tilt and offset. */
+/* About 28% smaller than the previous 104% crown, sitting on the upper-left rim. */
 .player-avatar-crown {
   z-index: 2;
   top: 0;
-  left: 50%;
-  width: 104%;
+  left: 0;
+  width: 75%;
   height: auto;
   max-width: none;
-  transform: translate(-58%, -42%) rotate(-16deg);
+  transform: translate(-28%, -86%) rotate(-8deg);
+  transform-origin: 78% 100%;
+}
+
+/* Artwork paints outside the photo. Physical margins keep that overflow
+   inside the row in both LTR and RTL, including the crown's left hang. */
+.player-avatar-small.player-avatar-champion {
+  margin: 4px 10px 12px;
+}
+
+.player-avatar-medium.player-avatar-champion {
+  margin: 6px 14px 16px;
+}
+
+.player-avatar-large.player-avatar-champion {
+  margin: 10px 26px 28px;
+}
+
+.player-avatar-small.player-avatar-mvp {
+  margin-top: 16px;
+  margin-left: 10px;
+}
+
+.player-avatar-medium.player-avatar-mvp {
+  margin-top: 22px;
+  margin-left: 14px;
+}
+
+.player-avatar-large.player-avatar-mvp {
+  margin-top: 42px;
+  margin-left: 26px;
+}
+
+.player-avatar-small.player-avatar-champion.player-avatar-mvp {
+  margin-top: 16px;
+}
+
+.player-avatar-medium.player-avatar-champion.player-avatar-mvp {
+  margin-top: 22px;
+}
+
+.player-avatar-large.player-avatar-champion.player-avatar-mvp {
+  margin-top: 42px;
 }
 
 .player-avatar-small {
