@@ -170,6 +170,26 @@ button:disabled {
   justify-content: flex-start;
 }
 
+.history-award {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.history-award-label {
+  margin: 0;
+  font-weight: 700;
+}
+
+.history-award-players {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  justify-content: start;
+}
+
 .member-search {
   width: 100%;
   margin: 0 0 12px;
