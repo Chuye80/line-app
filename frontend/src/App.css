@@ -144,7 +144,7 @@ button:disabled {
   width: 104%;
   height: auto;
   max-width: none;
-  transform: translate(-76%, -118%) rotate(-16deg);
+  transform: translate(-76%, -108%) rotate(-16deg);
 }
 
 /* Artwork paints outside the photo. Physical margins keep that overflow
