@@ -8,6 +8,16 @@ import { championLabel, teamDisplayNames, teamLabel } from "./teamNames";
 import { PlayerAvatar } from "./PlayerAvatar";
 import { removeAvatar, uploadAvatar } from "./avatarStorage";
 import { matchesMemberSearch } from "./profileUtils";
+import {
+  gameDayGuide,
+  guideActionLabel,
+  guideBarLabel,
+  guideDetailLabel,
+  guideStageLabel,
+  mvpCandidates,
+  shouldRemindMvpVote,
+  viewerCanVoteForMvp,
+} from "./gameDayFlow";
 
 const API_URL =
   import.meta.env.VITE_API_URL?.replace(/\/$/, "") ??
@@ -614,6 +624,7 @@ function App() {
   const [editingMatches, setEditingMatches] = useState<Set<string>>(() => new Set());
   const [adjustingLineups, setAdjustingLineups] = useState<Set<string>>(() => new Set());
   const [mvpChoice, setMvpChoice] = useState("");
+  const [mvpVoteOpen, setMvpVoteOpen] = useState(false);
   const [surveyDraft, setSurveyDraft] = useState<
     Record<string, Partial<SurveyRating>>
   >({});
@@ -1337,6 +1348,15 @@ function App() {
   }, [section, gamePane, groupPane]);
 
   useEffect(() => {
+    if (!mvpVoteOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMvpVoteOpen(false);
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [mvpVoteOpen]);
+
+  useEffect(() => {
     if (!groupMenuOpen) return;
     function closeOnOutsidePointer(event: PointerEvent) {
       if (!groupMenuRef.current?.contains(event.target as Node)) {
@@ -1968,6 +1988,171 @@ function App() {
           ? "waiting"
           : "out"
       : null;
+  const focusDay = gameDay ?? finishedGameDay;
+  const viewerIsMvpParticipant = Boolean(
+    focusDay &&
+      currentMembership &&
+      !currentMembership.is_virtual &&
+      focusDay.participants.some(
+        (player) =>
+          player.id === currentMembership.id &&
+          !player.is_guest &&
+          !player.is_virtual
+      )
+  );
+  const mvpVotingOpen = Boolean(focusDay?.mvp_open);
+  const viewerCanVote = viewerCanVoteForMvp({
+    mvpOpen: mvpVotingOpen,
+    viewerIsVirtual: Boolean(currentMembership?.is_virtual),
+    viewerIsParticipant: viewerIsMvpParticipant,
+  });
+  const mvpVoteRecorded = Boolean(focusDay?.my_vote);
+  const showMvpReminder = shouldRemindMvpVote({
+    mvpOpen: mvpVotingOpen,
+    viewerCanVote,
+    hasVoted: mvpVoteRecorded,
+  });
+  const guide = gameDayGuide({
+    status: focusDay?.status ?? null,
+    participantCount: focusDay?.participant_count ?? 0,
+    registeredCount: focusDay?.participants.length ?? 0,
+    teamCount: focusDay?.teams.length ?? 0,
+    mvpOpen: mvpVotingOpen,
+    viewerCanVote,
+    hasVoted: mvpVoteRecorded,
+    isAdmin,
+    selfNeedsRegistration: registrationState === "out",
+    pane: gamePane,
+  });
+  const registrationReady = Boolean(
+    gameDay &&
+      gameDay.participant_count > 0 &&
+      gameDay.participants.length === gameDay.participant_count
+  );
+  const mvpBallot = finishedGameDay
+    ? mvpCandidates(finishedGameDay.participants, currentMembership?.id ?? null)
+    : [];
+  function openMvpVote() {
+    setMvpChoice(finishedGameDay?.my_vote ?? "");
+    setMvpVoteOpen(true);
+  }
+  async function generateCurrentTeams() {
+    if (!group || !gameDay) return;
+    await runAction(() =>
+      apiFetch(`/groups/${group.id}/game-days/${gameDay.id}/generate-teams`, {
+        method: "POST",
+      })
+    );
+    setGamePane("teams");
+  }
+  async function startCurrentGameDay() {
+    if (!group || !gameDay) return;
+    await runAction(() =>
+      apiFetch(`/groups/${group.id}/game-days/${gameDay.id}/start`, {
+        method: "POST",
+      })
+    );
+    setGamePane("matches");
+  }
+  async function finishCurrentGameDay() {
+    if (!group || !gameDay) return;
+    if (!window.confirm(t("finishGameDayConfirm"))) return;
+    await runAction(() =>
+      apiFetch(`/groups/${group.id}/game-days/${gameDay.id}/finish`, {
+        method: "POST",
+      })
+    );
+  }
+  async function closeMvpVoting() {
+    if (!group || !finishedGameDay) return;
+    await runAction(() =>
+      apiFetch(`/groups/${group.id}/game-days/${finishedGameDay.id}/mvp/close`, {
+        method: "POST",
+      })
+    );
+    setMvpVoteOpen(false);
+  }
+  function runGuideAction(action: (typeof guide.actions)[number]) {
+    if (
+      action === "createGameDay" ||
+      action === "register" ||
+      action === "openRegistration"
+    ) {
+      setGamePane("registration");
+      return;
+    }
+    if (action === "reviewTeams") {
+      setGamePane("teams");
+      return;
+    }
+    if (action === "openMatches") {
+      setGamePane("matches");
+      return;
+    }
+    if (action === "generateTeams") {
+      void generateCurrentTeams();
+      return;
+    }
+    if (action === "startGameDay") {
+      void startCurrentGameDay();
+      return;
+    }
+    if (action === "finishGameDay") {
+      void finishCurrentGameDay();
+      return;
+    }
+    if (action === "voteMvp") {
+      openMvpVote();
+      return;
+    }
+    if (action === "viewResults") {
+      openSection("stats");
+    }
+  }
+  const guideActions = (
+    <div className="game-day-status-actions">
+      {guide.actions.map((action, index) => (
+        <button
+          key={action}
+          type="button"
+          className={index === 0 ? "primary-button" : "secondary-button"}
+          onClick={() => runGuideAction(action)}
+        >
+          {t(guideActionLabel[action])}
+        </button>
+      ))}
+      {isAdmin && finishedGameDay?.mvp_open && (
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={() => void closeMvpVoting()}
+        >
+          {t("closeVoting")}
+        </button>
+      )}
+      {isLive && isAdmin && gameDay && group && (
+        <button
+          className="danger-button"
+          type="button"
+          onClick={() => {
+            const groupId = group.id;
+            const gameDayId = gameDay.id;
+            void runAction(() =>
+              apiFetch(`/groups/${groupId}/game-days/${gameDayId}`, {
+                method: "DELETE",
+              })
+            ).then(() =>
+              setGroup((current) =>
+                current ? { ...current, game_day: null } : current
+              )
+            );
+          }}
+        >
+          {t("deleteGameDay")}
+        </button>
+      )}
+    </div>
+  );
   const latestMessage = chatMessages[0] ?? null;
   const dayStatisticsRows: StatisticsTableRow[] = dayStats.map((row) => ({
     id: row.member.id,
@@ -2454,7 +2639,14 @@ function App() {
                   <div className="home-summary">
                     <span className="muted-text">{t("nextGameDay")}</span>
                     {!gameDay ? (
-                      <strong>{t("noGameDay")}</strong>
+                      finishedGameDay ? (
+                        <strong>
+                          {t("flowFinished")} ·{" "}
+                          {new Date(finishedGameDay.game_datetime).toLocaleString()}
+                        </strong>
+                      ) : (
+                        <strong>{t("noGameDay")}</strong>
+                      )
                     ) : (
                       <>
                         <strong>
@@ -2486,6 +2678,19 @@ function App() {
                     <div className="live-banner">
                       <span className="live-dot" aria-hidden="true" />
                       <strong>{t("liveGameDay")}</strong>
+                    </div>
+                  )}
+                  {showMvpReminder && finishedGameDay && (
+                    <div className="mvp-reminder">
+                      <strong>{t("voteMvp")}</strong>
+                      <p>{t("mvpReminder")}</p>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={openMvpVote}
+                      >
+                        {t("voteMvp")}
+                      </button>
                     </div>
                   )}
                   <div className="home-shortcuts">
@@ -3036,6 +3241,26 @@ function App() {
                       </button>
                     ))}
                   </div>
+                  {focusDay && (
+                    <div className="game-day-status" role="status">
+                      <div className="game-day-status-label">
+                        {guide.bar === "live" && (
+                          <span className="live-dot" aria-hidden="true" />
+                        )}
+                        <strong>{t(guideBarLabel(guide.bar))}</strong>
+                      </div>
+                      <p className="game-day-status-stage">
+                        {t(guideStageLabel(guide.stage))}
+                      </p>
+                      <p className="muted-text">
+                        {t(guideDetailLabel(guide.detail)).replace(
+                          "{count}",
+                          String(guide.spotsRemaining)
+                        )}
+                      </p>
+                      {guideActions}
+                    </div>
+                  )}
                 </section>
               )}
 
@@ -3243,21 +3468,6 @@ function App() {
                     )}
                     {isAdmin && gameDay.status === "upcoming" && (
                       <div className="form-actions">
-                        {gameDay.teams.length > 0 && (
-                          <button
-                            className="primary-button"
-                            onClick={() =>
-                              runAction(() =>
-                                apiFetch(
-                                  `/groups/${group.id}/game-days/${gameDay.id}/start`,
-                                  { method: "POST" }
-                                )
-                              )
-                            }
-                          >
-                            {t("startGameDay")}
-                          </button>
-                        )}
                         <button
                           className="danger-button"
                           onClick={() =>
@@ -3280,49 +3490,6 @@ function App() {
                   </>
                 )}
               </section>
-              )}
-
-              {section === "game" && isLive && gameDay && (
-                <section className="card live-board">
-                  <div className="live-banner">
-                    <span className="live-dot" aria-hidden="true" />
-                    <strong>{t("liveGameDay")}</strong>
-                  </div>
-                  {isAdmin && (
-                    <div className="form-actions">
-                      <button
-                        className="primary-button"
-                        onClick={() =>
-                          runAction(() =>
-                            apiFetch(
-                              `/groups/${group.id}/game-days/${gameDay.id}/finish`,
-                              { method: "POST" }
-                            )
-                          )
-                        }
-                      >
-                        {t("finishGameDay")}
-                      </button>
-                      <button
-                        className="danger-button"
-                        onClick={() =>
-                          runAction(() =>
-                            apiFetch(
-                              `/groups/${group.id}/game-days/${gameDay.id}`,
-                              { method: "DELETE" }
-                            )
-                          ).then(() =>
-                            setGroup((current) =>
-                              current ? { ...current, game_day: null } : current
-                            )
-                          )
-                        }
-                      >
-                        {t("deleteGameDay")}
-                      </button>
-                    </div>
-                  )}
-                </section>
               )}
 
               {section === "group" && groupPane === "members" && (
@@ -3748,26 +3915,45 @@ function App() {
                 </section>
               )}
 
+              {section === "game" && gamePane === "teams" && !gameDay && (
+                <section className="card">
+                  <h2>{t("teams")}</h2>
+                  <p>
+                    {t(guideDetailLabel(guide.detail)).replace(
+                      "{count}",
+                      String(guide.spotsRemaining)
+                    )}
+                  </p>
+                </section>
+              )}
+
               {section === "game" && gamePane === "teams" && gameDay && (
                 <section className="card">
                   <h2>{t("generateTeams")}</h2>
-                  {isAdmin && (
+                  {isAdmin && registrationReady && (
                     <button
                       className="primary-button"
-                      disabled={
-                        gameDay.participants.length !== gameDay.participant_count
-                      }
-                      onClick={() =>
-                        runAction(() =>
-                          apiFetch(
-                            `/groups/${group.id}/game-days/${gameDay.id}/generate-teams`,
-                            { method: "POST" }
-                          )
-                        )
-                      }
+                      onClick={() => void generateCurrentTeams()}
                     >
                       {t("generateTeams")}
                     </button>
+                  )}
+                  {isAdmin && !registrationReady && (
+                    <div className="status-box pending">
+                      <p>
+                        {t(guideDetailLabel(guide.detail)).replace(
+                          "{count}",
+                          String(guide.spotsRemaining)
+                        )}
+                      </p>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => setGamePane("registration")}
+                      >
+                        {t("goToRegistration")}
+                      </button>
+                    </div>
                   )}
                   {gameDay.teams.length > 0 && isAdmin && (
                     <div className="team-edit-toolbar">
@@ -4572,7 +4758,12 @@ function App() {
               {section === "game" && gamePane === "matches" && !isLive && (
                 <section className="card">
                   <h2>{t("matches")}</h2>
-                  <p>{t("matchesWhenLive")}</p>
+                  <p>
+                    {t(guideDetailLabel(guide.detail)).replace(
+                      "{count}",
+                      String(guide.spotsRemaining)
+                    )}
+                  </p>
                 </section>
               )}
 
@@ -4642,49 +4833,17 @@ function App() {
                         {finishedGameDay.eligible_voters}
                       </p>
                       {finishedGameDay.my_vote && <p>{t("youVoted")}</p>}
-                      {currentMembership && !currentMembership.is_virtual && (
-                        <div className="form-actions">
-                          <select
-                            value={mvpChoice}
-                            onChange={(event) => setMvpChoice(event.target.value)}
-                          >
-                            <option value="">—</option>
-                            {finishedGameDay.participants
-                              .filter(
-                                (player) =>
-                                  !player.is_virtual &&
-                                  !player.is_guest &&
-                                  player.id !== currentMembership.id
-                              )
-                              .map((player) => (
-                                <option key={player.id} value={player.id}>
-                                  {playerName(player)}
-                                </option>
-                              ))}
-                          </select>
-                          <button
-                            className="primary-button"
-                            disabled={!mvpChoice}
-                            onClick={() =>
-                              runAction(() =>
-                                apiFetch(
-                                  `/groups/${group.id}/game-days/${finishedGameDay.id}/mvp`,
-                                  {
-                                    method: "POST",
-                                    headers: {
-                                      "Content-Type": "application/json",
-                                    },
-                                    body: JSON.stringify({
-                                      nominee_membership_id: mvpChoice,
-                                    }),
-                                  }
-                                )
-                              )
-                            }
-                          >
-                            {t("submitVote")}
-                          </button>
-                        </div>
+                      {viewerCanVote && (
+                        <button
+                          className="primary-button"
+                          type="button"
+                          onClick={openMvpVote}
+                        >
+                          {t("voteMvp")}
+                        </button>
+                      )}
+                      {!viewerCanVote && (
+                        <p className="muted-text">{t("flowDetailNotEligible")}</p>
                       )}
                       {isAdmin && (
                         <button
@@ -4858,6 +5017,77 @@ function App() {
           )}
         </main>
       </div>
+      {mvpVoteOpen && finishedGameDay && group && (
+        <div
+          className="mvp-modal-backdrop"
+          onClick={() => setMvpVoteOpen(false)}
+        >
+          <div
+            className="mvp-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mvp-vote-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="mvp-vote-title">{t("voteMvp")}</h2>
+            {finishedGameDay.my_vote && (
+              <p className="status-box approved">{t("youVoted")}</p>
+            )}
+            <p className="muted-text">
+              {finishedGameDay.votes_cast}/{finishedGameDay.eligible_voters}
+            </p>
+            {mvpBallot.length === 0 ? (
+              <p>{t("noMvpCandidates")}</p>
+            ) : (
+              <div className="mvp-candidates">
+                {mvpBallot.map((player) => (
+                  <label className="mvp-candidate" key={player.id}>
+                    <input
+                      type="radio"
+                      name="mvp-candidate"
+                      value={player.id}
+                      checked={mvpChoice === player.id}
+                      onChange={() => setMvpChoice(player.id)}
+                    />
+                    <PlayerAvatar player={player} size="small" />
+                    <span>{playerName(player)}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="form-actions">
+              <button
+                className="primary-button"
+                type="button"
+                disabled={!mvpChoice || mvpBallot.length === 0}
+                onClick={() =>
+                  runAction(() =>
+                    apiFetch(
+                      `/groups/${group.id}/game-days/${finishedGameDay.id}/mvp`,
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          nominee_membership_id: mvpChoice,
+                        }),
+                      }
+                    )
+                  )
+                }
+              >
+                {finishedGameDay.my_vote ? t("updateVote") : t("submitVote")}
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setMvpVoteOpen(false)}
+              >
+                {t("cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <nav className="bottom-nav" aria-label={t("appName")}>
         {(
           [
