@@ -136,7 +136,7 @@ button:disabled {
   transform: translate(-50%, -45.8%);
 }
 
-/* 104% width and -16deg tilt, lifted so the base meets the top of the photo. */
+/* 104% width and -16deg tilt; perched upper-left with clearance above the photo/wreath. */
 .player-avatar-crown {
   z-index: 2;
   top: 0;
@@ -144,7 +144,7 @@ button:disabled {
   width: 104%;
   height: auto;
   max-width: none;
-  transform: translate(-58%, -108%) rotate(-16deg);
+  transform: translate(-76%, -118%) rotate(-16deg);
 }
 
 /* Artwork paints outside the photo. Physical margins keep that overflow
