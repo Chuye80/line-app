@@ -43,6 +43,32 @@ def test_migration_backfills_legacy_first_name_without_inventing_last_name(sql):
         assert cur.fetchone() == ("Developer", "Developer", None, None)
 
 
+def test_private_avatar_bucket_and_storage_policies_are_installed(sql):
+    with sql.cursor() as cur:
+        cur.execute(
+            """
+            SELECT public, file_size_limit, allowed_mime_types
+            FROM storage.buckets WHERE id = 'player-avatars'
+            """
+        )
+        assert cur.fetchone() == (False, 2097152, ["image/webp"])
+        cur.execute(
+            """
+            SELECT policyname
+            FROM pg_policies
+            WHERE schemaname = 'storage' AND tablename = 'objects'
+            ORDER BY policyname
+            """
+        )
+        assert {row[0] for row in cur.fetchall()} == {
+            "group admins delete player avatars",
+            "group admins insert player avatars",
+            "group admins update player avatars",
+            "player avatars read",
+            "registered users write own avatar",
+        }
+
+
 def test_new_auth_users_require_structured_names_and_use_nickname(sql):
     with sql.cursor() as cur:
         try:
