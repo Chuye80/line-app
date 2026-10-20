@@ -1766,3 +1766,90 @@ button:disabled {
   background: #111827;
   color: white;
 }
+
+.game-day-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.game-day-status-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.game-day-status-stage,
+.game-day-status p {
+  margin: 0;
+}
+
+.game-day-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.game-day-status-actions button {
+  flex: 1 1 9rem;
+  min-height: 44px;
+}
+
+.mvp-reminder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #fdba74;
+  border-radius: 12px;
+  background: #fff7ed;
+}
+
+.mvp-reminder p {
+  margin: 0;
+}
+
+.mvp-modal-backdrop {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(17, 24, 39, 0.45);
+  inset: 0;
+}
+
+.mvp-modal {
+  width: min(32rem, 100%);
+  max-height: min(80vh, 40rem);
+  overflow: auto;
+  padding: 16px;
+  border-radius: 16px;
+  background: white;
+}
+
+.mvp-candidates {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 16px;
+}
+
+.mvp-candidate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+@media (min-width: 720px) {
+  .mvp-modal-backdrop {
+    align-items: center;
+  }
+}
