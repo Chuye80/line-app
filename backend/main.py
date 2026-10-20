@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -98,7 +98,15 @@ class CurrentUser(BaseModel):
 
 
 class UpdateProfileRequest(BaseModel):
-    display_name: str = Field(min_length=1, max_length=80)
+    # display_name keeps the previous frontend compatible during rollout.
+    display_name: str | None = Field(default=None, max_length=80)
+    first_name: str | None = Field(default=None, max_length=80)
+    last_name: str | None = Field(default=None, max_length=80)
+    nickname: str | None = Field(default=None, max_length=80)
+
+
+class UpdateAvatarRequest(BaseModel):
+    avatar_path: str | None = Field(default=None, max_length=500)
 
 
 class CreateGroupRequest(BaseModel):
@@ -327,11 +335,50 @@ def get_group_or_404(db: Session, group_id: UUID) -> Group:
     return group
 
 
+def optional_name(value: str | None) -> str | None:
+    stripped = value.strip() if value else ""
+    return stripped or None
+
+
+def valid_avatar_path(path: str, prefix: str) -> bool:
+    filename = path.removeprefix(prefix)
+    return (
+        path.startswith(prefix)
+        and bool(filename)
+        and "/" not in filename
+        and filename.endswith(".webp")
+    )
+
+
+def normal_profile_name(profile: Profile | None) -> str:
+    if profile is None:
+        return "Player"
+    return (
+        optional_name(profile.nickname)
+        or optional_name(profile.first_name)
+        or optional_name(profile.display_name)
+        or "Player"
+    )
+
+
+def full_profile_name(profile: Profile | None) -> str:
+    if profile is None:
+        return "Player"
+    full = " ".join(
+        part for part in (
+            optional_name(profile.first_name),
+            optional_name(profile.last_name),
+        )
+        if part
+    )
+    return full or optional_name(profile.display_name) or "Player"
+
+
 def profile_names(db: Session, user_ids: list[UUID]) -> dict[UUID, str]:
     if not user_ids:
         return {}
     rows = db.query(Profile).filter(Profile.id.in_(user_ids)).all()
-    return {row.id: row.display_name for row in rows}
+    return {row.id: normal_profile_name(row) for row in rows}
 
 
 def profile_name(
@@ -342,7 +389,24 @@ def profile_name(
     if cache is not None and user_id in cache:
         return cache[user_id]
     profile = db.get(Profile, user_id)
-    return profile.display_name if profile else "Player"
+    return normal_profile_name(profile)
+
+
+def profile_to_dict(profile: Profile, email: str | None = None) -> dict:
+    return {
+        "id": str(profile.id),
+        "email": email,
+        "display_name": normal_profile_name(profile),
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "nickname": profile.nickname,
+        "full_name": full_profile_name(profile),
+        "avatar_path": profile.avatar_path,
+        "avatar_version": profile.avatar_version,
+        "is_complete": bool(
+            optional_name(profile.first_name) and optional_name(profile.last_name)
+        ),
+    }
 
 
 def membership_name(
@@ -571,10 +635,21 @@ def membership_to_dict(
     cache: dict[UUID, str] | None = None,
 ) -> dict:
     is_guest = membership.game_day_id is not None
+    profile = db.get(Profile, membership.user_id) if membership.user_id else None
     return {
         "id": str(membership.id),
         "user_id": str(membership.user_id) if membership.user_id else None,
         "name": membership_name(db, membership, cache),
+        "full_name": (
+            full_profile_name(profile)
+            if membership.user_id is not None
+            else membership.display_name or "Virtual Player"
+        ),
+        "first_name": profile.first_name if profile else None,
+        "last_name": profile.last_name if profile else None,
+        "nickname": profile.nickname if profile else None,
+        "avatar_path": profile.avatar_path if profile else membership.avatar_path,
+        "avatar_version": profile.avatar_version if profile else membership.avatar_version,
         "rating": float(membership.rating),
         "goalkeeper_rating": float(membership.goalkeeper_rating),
         "is_subscriber": bool(membership.is_subscriber),
@@ -1375,7 +1450,10 @@ def me(user: CurrentUser = Depends(get_current_user)):
           'id', CAST(:uid AS text),
           'email', CAST(:email AS text),
           'display_name', coalesce(
-            (SELECT display_name FROM profiles WHERE id = CAST(:uid AS uuid)),
+            (
+              SELECT public.lineapp_normal_name(nickname, first_name, display_name)
+              FROM profiles WHERE id = CAST(:uid AS uuid)
+            ),
             'Player'
           ),
           'is_developer', exists(
@@ -1392,11 +1470,10 @@ def get_profile(
     user: CurrentUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "display_name": profile_name(db, user.id),
-    }
+    profile = db.get(Profile, user.id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile_to_dict(profile, user.email)
 
 
 @app.put("/profile")
@@ -1405,21 +1482,62 @@ def update_profile(
     user: CurrentUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    display_name = body.display_name.strip()
-    if not display_name:
-        raise HTTPException(status_code=400, detail="Display name cannot be empty")
     profile = db.get(Profile, user.id)
     if profile is None:
-        profile = Profile(id=user.id, display_name=display_name)
+        legacy_name = optional_name(body.display_name)
+        first_name = optional_name(body.first_name) or legacy_name
+        if first_name is None:
+            raise HTTPException(status_code=400, detail="First name is required")
+        profile = Profile(
+            id=user.id,
+            display_name=optional_name(body.nickname) or first_name,
+            first_name=first_name,
+            last_name=optional_name(body.last_name),
+            nickname=optional_name(body.nickname),
+        )
         db.add(profile)
     else:
-        profile.display_name = display_name
+        if body.first_name is None and body.display_name is not None:
+            # Compatibility with the previous single-name profile form.
+            legacy_name = optional_name(body.display_name)
+            if legacy_name is None:
+                raise HTTPException(status_code=400, detail="Display name cannot be empty")
+            profile.first_name = legacy_name
+            profile.nickname = None
+        else:
+            if "first_name" in body.model_fields_set:
+                first_name = optional_name(body.first_name)
+                if first_name is None:
+                    raise HTTPException(status_code=400, detail="First name is required")
+                profile.first_name = first_name
+            if "last_name" in body.model_fields_set:
+                profile.last_name = optional_name(body.last_name)
+            if "nickname" in body.model_fields_set:
+                profile.nickname = optional_name(body.nickname)
+
+        profile.display_name = normal_profile_name(profile)
     db.commit()
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "display_name": display_name,
-    }
+    db.refresh(profile)
+    return profile_to_dict(profile, user.email)
+
+
+@app.put("/profile/avatar")
+def update_profile_avatar(
+    body: UpdateAvatarRequest,
+    user: CurrentUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    profile = db.get(Profile, user.id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    path = optional_name(body.avatar_path)
+    if path is not None and not valid_avatar_path(path, f"users/{user.id}/"):
+        raise HTTPException(status_code=400, detail="Invalid profile avatar path")
+    profile.avatar_path = path
+    profile.avatar_version += 1
+    db.commit()
+    db.refresh(profile)
+    return profile_to_dict(profile, user.email)
 
 
 @app.get("/bootstrap")
@@ -1436,7 +1554,10 @@ def bootstrap(
           'id', CAST(:uid AS text),
           'email', CAST(:email AS text),
           'display_name', coalesce(
-            (SELECT display_name FROM profiles WHERE id = CAST(:uid AS uuid)),
+            (
+              SELECT public.lineapp_normal_name(nickname, first_name, display_name)
+              FROM profiles WHERE id = CAST(:uid AS uuid)
+            ),
             'Player'
           ),
           'is_developer', exists(
@@ -1573,7 +1694,11 @@ def get_group_messages(
           SELECT
             gm.id::text AS id,
             gm.sender_user_id::text AS sender_user_id,
-            coalesce(p.display_name, 'Player') AS sender_name,
+            public.lineapp_normal_name(
+              p.nickname, p.first_name, p.display_name
+            ) AS sender_name,
+            p.avatar_path AS sender_avatar_path,
+            p.avatar_version AS sender_avatar_version,
             gm.message,
             gm.created_at
           FROM group_messages gm
@@ -1614,10 +1739,13 @@ def create_group_message(
         .one()
     )
     db.commit()
+    profile = db.get(Profile, user.id)
     return {
         "id": str(row["id"]),
         "sender_user_id": str(row["sender_user_id"]),
         "sender_name": profile_name(db, user.id),
+        "sender_avatar_path": profile.avatar_path if profile else None,
+        "sender_avatar_version": profile.avatar_version if profile else 0,
         "message": row["message"],
         "created_at": row["created_at"],
     }
@@ -1723,7 +1851,14 @@ def pending_join_requests(
               jsonb_build_object(
                 'id', jr.id::text,
                 'user_id', jr.user_id::text,
-                'user_name', coalesce(p.display_name, 'Player'),
+                'user_name', public.lineapp_normal_name(
+                  p.nickname, p.first_name, p.display_name
+                ),
+                'user_full_name', public.lineapp_full_name(
+                  p.first_name, p.last_name, p.display_name
+                ),
+                'avatar_path', p.avatar_path,
+                'avatar_version', p.avatar_version,
                 'status', jr.status
               )
               ORDER BY jr.created_at
@@ -1906,6 +2041,38 @@ def add_virtual_member(
     return membership_to_dict(db, membership)
 
 
+@app.get("/groups/{group_id}/members/search")
+def search_registered_members(
+    group_id: UUID,
+    q: str = Query(min_length=1, max_length=80),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_membership(db, group, user)
+    query = q.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Search query cannot be empty")
+    pattern = f"%{query}%"
+    rows = (
+        db.query(Membership)
+        .join(Profile, Profile.id == Membership.user_id)
+        .filter(
+            Membership.group_id == group.id,
+            Membership.user_id.is_not(None),
+            (
+                Profile.first_name.ilike(pattern)
+                | Profile.last_name.ilike(pattern)
+                | Profile.nickname.ilike(pattern)
+            ),
+        )
+        .order_by(Profile.first_name, Profile.last_name)
+        .limit(30)
+        .all()
+    )
+    return [membership_to_dict(db, membership) for membership in rows]
+
+
 @app.put("/groups/{group_id}/members/{membership_id}")
 def update_member(
     group_id: UUID,
@@ -1944,6 +2111,34 @@ def update_member(
     if game_day and field_rating_changed:
         clear_teams(db, game_day)
     db.commit()
+    return membership_to_dict(db, membership)
+
+
+@app.put("/groups/{group_id}/members/{membership_id}/avatar")
+def update_member_avatar(
+    group_id: UUID,
+    membership_id: UUID,
+    body: UpdateAvatarRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_admin(db, group, user)
+    membership = db.get(Membership, membership_id)
+    if (
+        membership is None
+        or membership.group_id != group.id
+        or membership.user_id is not None
+    ):
+        raise HTTPException(status_code=404, detail="Virtual player or guest not found")
+    path = optional_name(body.avatar_path)
+    expected_prefix = f"groups/{group.id}/members/{membership.id}/"
+    if path is not None and not valid_avatar_path(path, expected_prefix):
+        raise HTTPException(status_code=400, detail="Invalid player avatar path")
+    membership.avatar_path = path
+    membership.avatar_version += 1
+    db.commit()
+    db.refresh(membership)
     return membership_to_dict(db, membership)
 
 
