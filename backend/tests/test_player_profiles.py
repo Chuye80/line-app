@@ -69,6 +69,84 @@ def test_private_avatar_bucket_and_storage_policies_are_installed(sql):
         }
 
 
+def test_avatar_authorization_helpers_scope_reads_and_admin_writes(sql):
+    admin_id = create_user(sql, "Ari", "Admin")
+    member_id = create_user(sql, "Mia", "Member")
+    outsider_id = create_user(sql, "Oren", "Outside")
+    with sql.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO groups (name, created_by, invite_code)
+            VALUES ('Avatar FC', %s, 'avatar-test') RETURNING id
+            """,
+            (str(admin_id),),
+        )
+        group_id = cur.fetchone()[0]
+        cur.execute(
+            """
+            INSERT INTO memberships (
+              group_id, user_id, display_name, rating, goalkeeper_rating,
+              is_subscriber, is_admin
+            )
+            VALUES
+              (%s, %s, null, 3, 3, false, true),
+              (%s, %s, null, 3, 3, false, false),
+              (%s, null, 'Virtual', 3, 3, false, false)
+            RETURNING id
+            """,
+            (str(group_id), str(admin_id), str(group_id), str(member_id), str(group_id)),
+        )
+        rows = cur.fetchall()
+        virtual_id = rows[2][0]
+        cur.execute("set role authenticated")
+        cur.execute(
+            "select set_config('request.jwt.claim.sub', %s, false)",
+            (str(admin_id),),
+        )
+        cur.execute(
+            "select private.lineapp_can_read_user_avatar(%s)",
+            (str(member_id),),
+        )
+        assert cur.fetchone()[0] is True
+        cur.execute(
+            "select private.lineapp_can_read_user_avatar(%s)",
+            (str(outsider_id),),
+        )
+        assert cur.fetchone()[0] is False
+        cur.execute(
+            "select private.lineapp_can_access_member_avatar(%s, %s, true)",
+            (str(group_id), str(virtual_id)),
+        )
+        assert cur.fetchone()[0] is True
+        cur.execute(
+            """
+            INSERT INTO storage.objects (bucket_id, name)
+            VALUES ('player-avatars', %s)
+            """,
+            (f"users/{admin_id}/own.webp",),
+        )
+        cur.execute(
+            """
+            INSERT INTO storage.objects (bucket_id, name)
+            VALUES ('player-avatars', %s)
+            """,
+            (f"groups/{group_id}/members/{virtual_id}/virtual.webp",),
+        )
+        try:
+            cur.execute(
+                """
+                INSERT INTO storage.objects (bucket_id, name)
+                VALUES ('player-avatars', %s)
+                """,
+                (f"users/{outsider_id}/stolen.webp",),
+            )
+        except psycopg2.errors.InsufficientPrivilege:
+            pass
+        else:
+            raise AssertionError("authenticated user wrote another user's avatar")
+        cur.execute("reset role")
+
+
 def test_new_auth_users_require_structured_names_and_use_nickname(sql):
     with sql.cursor() as cur:
         try:

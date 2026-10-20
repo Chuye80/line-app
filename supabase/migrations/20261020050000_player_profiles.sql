@@ -76,6 +76,53 @@ as $$
   );
 $$;
 
+create or replace function private.lineapp_can_read_user_avatar(
+  p_target_user_id text
+) returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  select
+    p_target_user_id = auth.uid()::text
+    or exists (
+      select 1
+      from public.memberships viewer
+      join public.memberships target on target.group_id = viewer.group_id
+      where viewer.user_id = auth.uid()
+        and target.user_id::text = p_target_user_id
+    );
+$$;
+
+create or replace function private.lineapp_can_access_member_avatar(
+  p_group_id text,
+  p_membership_id text,
+  p_require_admin boolean
+) returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  select exists (
+    select 1
+    from public.memberships viewer
+    join public.memberships target on target.group_id = viewer.group_id
+    where viewer.user_id = auth.uid()
+      and viewer.group_id::text = p_group_id
+      and target.id::text = p_membership_id
+      and target.user_id is null
+      and (not p_require_admin or viewer.is_admin)
+  );
+$$;
+
+revoke all on function private.lineapp_can_read_user_avatar(text) from public;
+revoke all on function private.lineapp_can_access_member_avatar(text, text, boolean) from public;
+grant usage on schema private to authenticated;
+grant execute on function private.lineapp_can_read_user_avatar(text) to authenticated;
+grant execute on function private.lineapp_can_access_member_avatar(text, text, boolean) to authenticated;
+
 -- New Auth users must carry structured names. Existing users are untouched.
 create or replace function public.handle_new_user()
 returns trigger
@@ -217,29 +264,16 @@ begin
       and (
         (
           (storage.foldername(name))[1] = 'users'
-          and (
-            (storage.foldername(name))[2] = auth.uid()::text
-            or exists (
-              select 1
-              from public.memberships viewer
-              join public.memberships target
-                on target.group_id = viewer.group_id
-              where viewer.user_id = auth.uid()
-                and target.user_id::text = (storage.foldername(name))[2]
-            )
+          and private.lineapp_can_read_user_avatar(
+            (storage.foldername(name))[2]
           )
         )
         or (
           (storage.foldername(name))[1] = 'groups'
-          and exists (
-            select 1
-            from public.memberships viewer
-            join public.memberships target
-              on target.group_id = viewer.group_id
-            where viewer.user_id = auth.uid()
-              and viewer.group_id::text = (storage.foldername(name))[2]
-              and target.id::text = (storage.foldername(name))[4]
-              and target.user_id is null
+          and private.lineapp_can_access_member_avatar(
+            (storage.foldername(name))[2],
+            (storage.foldername(name))[4],
+            false
           )
         )
       )
@@ -267,15 +301,10 @@ begin
     with check (
       bucket_id = 'player-avatars'
       and (storage.foldername(name))[1] = 'groups'
-      and exists (
-        select 1
-        from public.memberships admin
-        join public.memberships target on target.group_id = admin.group_id
-        where admin.user_id = auth.uid()
-          and admin.is_admin
-          and admin.group_id::text = (storage.foldername(name))[2]
-          and target.id::text = (storage.foldername(name))[4]
-          and target.user_id is null
+      and private.lineapp_can_access_member_avatar(
+        (storage.foldername(name))[2],
+        (storage.foldername(name))[4],
+        true
       )
     )
   $policy$;
@@ -286,29 +315,19 @@ begin
     using (
       bucket_id = 'player-avatars'
       and (storage.foldername(name))[1] = 'groups'
-      and exists (
-        select 1
-        from public.memberships admin
-        join public.memberships target on target.group_id = admin.group_id
-        where admin.user_id = auth.uid()
-          and admin.is_admin
-          and admin.group_id::text = (storage.foldername(name))[2]
-          and target.id::text = (storage.foldername(name))[4]
-          and target.user_id is null
+      and private.lineapp_can_access_member_avatar(
+        (storage.foldername(name))[2],
+        (storage.foldername(name))[4],
+        true
       )
     )
     with check (
       bucket_id = 'player-avatars'
       and (storage.foldername(name))[1] = 'groups'
-      and exists (
-        select 1
-        from public.memberships admin
-        join public.memberships target on target.group_id = admin.group_id
-        where admin.user_id = auth.uid()
-          and admin.is_admin
-          and admin.group_id::text = (storage.foldername(name))[2]
-          and target.id::text = (storage.foldername(name))[4]
-          and target.user_id is null
+      and private.lineapp_can_access_member_avatar(
+        (storage.foldername(name))[2],
+        (storage.foldername(name))[4],
+        true
       )
     )
   $policy$;
@@ -319,15 +338,10 @@ begin
     using (
       bucket_id = 'player-avatars'
       and (storage.foldername(name))[1] = 'groups'
-      and exists (
-        select 1
-        from public.memberships admin
-        join public.memberships target on target.group_id = admin.group_id
-        where admin.user_id = auth.uid()
-          and admin.is_admin
-          and admin.group_id::text = (storage.foldername(name))[2]
-          and target.id::text = (storage.foldername(name))[4]
-          and target.user_id is null
+      and private.lineapp_can_access_member_avatar(
+        (storage.foldername(name))[2],
+        (storage.foldername(name))[4],
+        true
       )
     )
   $policy$;

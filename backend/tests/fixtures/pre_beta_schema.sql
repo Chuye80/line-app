@@ -123,6 +123,7 @@ values (
 
 -- Minimal Supabase Storage catalog surface for migration-policy tests.
 create schema storage;
+grant usage on schema storage to authenticated;
 
 create table storage.buckets (
   id text primary key,
@@ -139,6 +140,7 @@ create table storage.objects (
 );
 
 alter table storage.objects enable row level security;
+grant select, insert, update, delete on storage.objects to authenticated;
 
 create function storage.foldername(name text)
 returns text[]
