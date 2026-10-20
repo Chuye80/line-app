@@ -2497,7 +2497,7 @@ function App() {
                   {t("logOut")}
                 </button>
               </div>
-              <p className="muted-text">Version 1.0.0-beta.9</p>
+              <p className="muted-text">Version 1.0.0-beta.10</p>
             </section>
           )}
           {section === "settings" && isDeveloper && DEV_TOOLS_ENABLED && (
