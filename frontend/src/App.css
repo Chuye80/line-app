@@ -179,8 +179,7 @@ button:disabled {
 }
 
 .page-layout {
-  display: flex;
-  align-items: flex-start;
+  display: block;
 }
 
 .developer-panel {
@@ -824,7 +823,7 @@ button:disabled {
 }
 
 @media (max-width: 650px) {
-  .header {
+  .header:not(.app-header) {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -1551,4 +1550,130 @@ button:disabled {
     height: 2.5rem;
     font-size: 2.5rem;
   }
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  align-items: center;
+  padding: 10px 16px;
+}
+
+.app-header-title {
+  min-width: 0;
+}
+
+.app-header h1 {
+  font-size: 22px;
+}
+
+.app-header p {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: #6b7280;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.avatar-button[aria-current="page"] {
+  border-color: #111827;
+}
+
+.app-main {
+  padding-bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
+.section-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.section-tabs button {
+  flex: 1 0 auto;
+  min-height: 44px;
+}
+
+.home-summary,
+.home-updates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.home-shortcuts,
+.home-updates {
+  margin-top: 16px;
+}
+
+.home-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.home-updates .text-button {
+  display: -webkit-box;
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #1f2937;
+  font-weight: 600;
+  text-align: start;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.settings-tools.developer-panel {
+  position: static;
+  width: auto;
+  min-height: 0;
+  margin-bottom: 20px;
+  padding: 22px;
+  border: none;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.bottom-nav {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid #e5e7eb;
+  background: white;
+}
+
+.bottom-nav-button {
+  min-height: 48px;
+  padding: 6px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bottom-nav-button.active {
+  background: #111827;
+  color: white;
 }
