@@ -525,6 +525,10 @@ function toLocalIso(date: string, time: string) {
   return new Date(`${date}T${time}`).toISOString();
 }
 
+type MainSection = "home" | "game" | "group" | "stats" | "settings";
+type GamePane = "registration" | "teams" | "matches";
+type GroupPane = "members" | "ratings" | "manage" | "chat";
+
 function App() {
   const [lang, setLang] = useState<Language>(loadLang);
   const t = (key: string) => translations[lang][key] ?? key;
@@ -545,7 +549,9 @@ function App() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [showProfile, setShowProfile] = useState(false);
+  const [section, setSection] = useState<MainSection>("home");
+  const [gamePane, setGamePane] = useState<GamePane>("registration");
+  const [groupPane, setGroupPane] = useState<GroupPane>("members");
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileFirstName, setProfileFirstName] = useState("");
   const [profileLastName, setProfileLastName] = useState("");
@@ -568,12 +574,7 @@ function App() {
     new URLSearchParams(window.location.search).get("invite") ?? ""
   );
   const [stats, setStats] = useState<StatRow[]>([]);
-  const [tab, setTab] = useState<"group" | "stats">("group");
   const [statsScope, setStatsScope] = useState<"day" | "overall">("overall");
-  const [liveTab, setLiveTab] = useState<
-    "matches" | "standings" | "stats" | "teams"
-  >("matches");
-  const [liveWorkspace, setLiveWorkspace] = useState(false);
 
   const [newGroupName, setNewGroupName] = useState("");
   const [chatExpanded, setChatExpanded] = useState(true);
@@ -581,7 +582,7 @@ function App() {
   const [chatDraft, setChatDraft] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const [chatError, setChatError] = useState("");
-  const [membersExpanded, setMembersExpanded] = useState(false);
+  const [membersExpanded, setMembersExpanded] = useState(true);
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [memberName, setMemberName] = useState("");
@@ -762,7 +763,12 @@ function App() {
     }
     setActAs(membershipId);
     setSimulatedName(name);
-    setTab("group");
+  }
+
+  function openSection(next: MainSection) {
+    setSection(next);
+    setEditingProfile(false);
+    setProfileError("");
   }
 
   async function parseError(response: Response) {
@@ -1107,7 +1113,7 @@ function App() {
   useEffect(() => {
     if (!session) {
       setProfile(null);
-      setShowProfile(false);
+      setSection("home");
       setEditingProfile(false);
       populateProfileForm(null);
       setProfileError("");
@@ -1199,11 +1205,11 @@ function App() {
   }, [selectedGroupId]);
 
   useEffect(() => {
-    if (tab !== "stats" || !selectedGroupId || membership?.state !== "member") {
+    if (section !== "stats" || !selectedGroupId || membership?.state !== "member") {
       return;
     }
     loadStats(selectedGroupId).catch(() => {});
-  }, [tab, selectedGroupId, membership?.state]);
+  }, [section, selectedGroupId, membership?.state]);
 
   useEffect(() => {
     setChatMessages([]);
@@ -1325,10 +1331,8 @@ function App() {
   }, [group?.game_day?.teams, group?.game_day?.unassigned, editingTeams]);
 
   useEffect(() => {
-    if (liveWorkspace && group?.game_day?.status !== "live") {
-      setLiveWorkspace(false);
-    }
-  }, [liveWorkspace, group?.game_day?.status]);
+    window.scrollTo(0, 0);
+  }, [section, gamePane, groupPane]);
 
   useEffect(() => {
     if (invitePreview?.state === "member") {
@@ -1438,7 +1442,7 @@ function App() {
         )
       );
       refreshData().catch(() => {});
-      if (group && tab === "stats") loadStats(group.id).catch(() => {});
+      if (group && section === "stats") loadStats(group.id).catch(() => {});
     } catch (err) {
       setProfileError(
         err instanceof Error ? err.message : t("profileSaveFailed")
@@ -1914,6 +1918,15 @@ function App() {
   const currentTeamLabel = (teamName: string) =>
     teamLabel(currentTeamNames, teamName);
   const isLive = gameDay?.status === "live";
+  const registrationState =
+    currentMembership && gameDay
+      ? gameDay.participants.some((item) => item.id === currentMembership.id)
+        ? "registered"
+        : gameDay.waiting_list.some((item) => item.id === currentMembership.id)
+          ? "waiting"
+          : "out"
+      : null;
+  const latestMessage = chatMessages[0] ?? null;
   const dayStatisticsRows: StatisticsTableRow[] = dayStats.map((row) => ({
     id: row.member.id,
     name: playerName(row.member),
@@ -2030,130 +2043,37 @@ function App() {
 
   return (
     <div className="app">
-      <header className="header">
-        <div>
+      <header className="header app-header">
+        <div className="app-header-title">
           <h1>⚽ {t("appName")}</h1>
-          <p>{session.user.email}</p>
-          <p className="muted-text">Version 1.0.0-beta.9</p>
+          {group && isMember && <p>{group.name}</p>}
         </div>
-        <div className="header-actions">
-          {languageToggle}
-          <button
-            className="secondary-button"
-            onClick={() => {
-              setShowProfile((current) => !current);
-              setEditingProfile(false);
-              populateProfileForm(profile);
-              if (profile) setProfileError("");
+        <button
+          type="button"
+          className="avatar-button"
+          aria-label={t("settings")}
+          aria-current={section === "settings" ? "page" : undefined}
+          onClick={() => {
+            populateProfileForm(profile);
+            openSection(section === "settings" ? "home" : "settings");
+          }}
+        >
+          <PlayerAvatar
+            player={{
+              name: profile?.display_name ?? session.user.email ?? t("myProfile"),
+              full_name: profile?.full_name,
+              first_name: profile?.first_name,
+              last_name: profile?.last_name,
+              avatar_path: profile?.avatar_path,
+              avatar_version: profile?.avatar_version,
             }}
-          >
-            {t("myProfile")}
-          </button>
-          <button className="secondary-button" onClick={() => supabase.auth.signOut()}>
-            {t("logOut")}
-          </button>
-        </div>
+          />
+        </button>
       </header>
 
       <div className="page-layout">
-        {isDeveloper && DEV_TOOLS_ENABLED && !liveWorkspace && (
-          <aside className="developer-panel">
-            <h3>{t("developerTools")}</h3>
-            <button
-              disabled={!group}
-              onClick={() =>
-                group &&
-                runAction(() =>
-                  apiFetch(
-                    `/dev/groups/${group.id}/add-test-members?count=${participantCount}`,
-                    { method: "POST" }
-                  )
-                )
-              }
-            >
-              {t("fillMembers")}
-            </button>
-            <button
-              disabled={!group}
-              onClick={() =>
-                group &&
-                runAction(() =>
-                  apiFetch(
-                    `/dev/groups/${group.id}/create-game?participant_count=${participantCount}&players_per_team=${playersPerTeam}`,
-                    { method: "POST" }
-                  )
-                )
-              }
-            >
-              {t("createTestGameDay")}
-            </button>
-            <button
-              disabled={!gameDay}
-              onClick={() =>
-                group &&
-                runAction(() =>
-                  apiFetch(`/dev/groups/${group.id}/register-all`, {
-                    method: "POST",
-                  })
-                )
-              }
-            >
-              {t("registerAll")}
-            </button>
-            <button
-              disabled={!gameDay}
-              onClick={() =>
-                group &&
-                runAction(() =>
-                  apiFetch(`/dev/groups/${group.id}/expire-priority`, {
-                    method: "POST",
-                  })
-                )
-              }
-            >
-              {t("expirePriority")}
-            </button>
-            <button
-              disabled={!gameDay}
-              onClick={() =>
-                group &&
-                runAction(() =>
-                  apiFetch(`/dev/groups/${group.id}/start-live`, {
-                    method: "POST",
-                  })
-                )
-              }
-            >
-              {t("startLive")}
-            </button>
-            <label className="view-as">
-              {t("viewAs")}
-              <select
-                value={actAs ?? ""}
-                onChange={(event) => {
-                  const picked = event.target.value;
-                  const member = group?.members.find(
-                    (item) => item.id === picked
-                  );
-                  viewAs(picked || null, member?.name ?? "");
-                }}
-              >
-                <option value="">{t("myself")}</option>
-                {(group?.members ?? [])
-                  .filter((member) => !member.is_virtual)
-                  .map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <p className="muted-text">{t("simulationNote")}</p>
-          </aside>
-        )}
-
-        <main className={liveWorkspace ? "container live-workspace" : "container"}>
-          {showProfile && (
+        <main className="container app-main">
+          {section === "settings" && (
             <section className="card profile-card">
               <h2>{t("myProfile")}</h2>
               {profile && (
@@ -2250,6 +2170,9 @@ function App() {
                     <span className="muted-text">
                       {t("displayedAs")}: {profile?.display_name ?? t("loading")}
                     </span>
+                    {profile?.email && (
+                      <span className="muted-text">{profile.email}</span>
+                    )}
                     {profile && !profile.is_complete && (
                       <span className="profile-incomplete">{t("profileIncomplete")}</span>
                     )}
@@ -2266,8 +2189,118 @@ function App() {
               {profileError && <p className="chat-error">{profileError}</p>}
             </section>
           )}
+          {section === "settings" && (
+            <section className="card">
+              <h2>{t("settings")}</h2>
+              {languageToggle}
+              <div className="form-actions">
+                <button
+                  className="secondary-button"
+                  onClick={() => supabase.auth.signOut()}
+                >
+                  {t("logOut")}
+                </button>
+              </div>
+              <p className="muted-text">Version 1.0.0-beta.9</p>
+            </section>
+          )}
+          {section === "settings" && isDeveloper && DEV_TOOLS_ENABLED && (
+            <aside className="developer-panel settings-tools">
+              <h3>{t("developerTools")}</h3>
+              <button
+                disabled={!group}
+                onClick={() =>
+                  group &&
+                  runAction(() =>
+                    apiFetch(
+                      `/dev/groups/${group.id}/add-test-members?count=${participantCount}`,
+                      { method: "POST" }
+                    )
+                  )
+                }
+              >
+                {t("fillMembers")}
+              </button>
+              <button
+                disabled={!group}
+                onClick={() =>
+                  group &&
+                  runAction(() =>
+                    apiFetch(
+                      `/dev/groups/${group.id}/create-game?participant_count=${participantCount}&players_per_team=${playersPerTeam}`,
+                      { method: "POST" }
+                    )
+                  )
+                }
+              >
+                {t("createTestGameDay")}
+              </button>
+              <button
+                disabled={!gameDay}
+                onClick={() =>
+                  group &&
+                  runAction(() =>
+                    apiFetch(`/dev/groups/${group.id}/register-all`, {
+                      method: "POST",
+                    })
+                  )
+                }
+              >
+                {t("registerAll")}
+              </button>
+              <button
+                disabled={!gameDay}
+                onClick={() =>
+                  group &&
+                  runAction(() =>
+                    apiFetch(`/dev/groups/${group.id}/expire-priority`, {
+                      method: "POST",
+                    })
+                  )
+                }
+              >
+                {t("expirePriority")}
+              </button>
+              <button
+                disabled={!gameDay}
+                onClick={() =>
+                  group &&
+                  runAction(() =>
+                    apiFetch(`/dev/groups/${group.id}/start-live`, {
+                      method: "POST",
+                    })
+                  )
+                }
+              >
+                {t("startLive")}
+              </button>
+              <label className="view-as">
+                {t("viewAs")}
+                <select
+                  value={actAs ?? ""}
+                  onChange={(event) => {
+                    const picked = event.target.value;
+                    const member = group?.members.find(
+                      (item) => item.id === picked
+                    );
+                    viewAs(picked || null, member?.name ?? "");
+                  }}
+                >
+                  <option value="">{t("myself")}</option>
+                  {(group?.members ?? [])
+                    .filter((member) => !member.is_virtual)
+                    .map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <p className="muted-text">{t("simulationNote")}</p>
+            </aside>
+          )}
           {actAs && (
-            <div className="simulation-banner group-page-only">
+            <div className="simulation-banner">
               <span>
                 {t("simulating")} <strong>{simulatedName || "…"}</strong>
               </span>
@@ -2278,8 +2311,10 @@ function App() {
           )}
           {error && <div className="error-box">{error}</div>}
 
-          {invitePreview && invitePreview.state !== "member" && (
-            <section className="card join-card group-page-only">
+          {(section === "home" || section === "settings") &&
+            invitePreview &&
+            invitePreview.state !== "member" && (
+            <section className="card join-card">
               <h2>
                 {t("invitedTo")} {invitePreview.name}
               </h2>
@@ -2305,7 +2340,148 @@ function App() {
             </section>
           )}
 
-          <section className="card group-page-only">
+          {section === "home" && (
+            <section className="card home-dashboard">
+              <h2>{group && isMember ? group.name : t("navHome")}</h2>
+              {!(group && isMember) ? (
+                <>
+                  <p>{t("chooseGroup")}</p>
+                  <button
+                    className="primary-button"
+                    onClick={() => openSection("settings")}
+                  >
+                    {t("openProfile")}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="home-summary">
+                    <span className="muted-text">{t("nextGameDay")}</span>
+                    {!gameDay ? (
+                      <strong>{t("noGameDay")}</strong>
+                    ) : (
+                      <>
+                        <strong>
+                          {statusLabel(gameDay.status)} ·{" "}
+                          {new Date(gameDay.game_datetime).toLocaleString()}
+                        </strong>
+                        {gameDay.status === "upcoming" && (
+                          <>
+                            <span>{countdownText(gameDay)}</span>
+                            <span>
+                              {gameDay.participants.length}/{gameDay.participant_count}{" "}
+                              {t("registered")} · {gameDay.waiting_list.length}{" "}
+                              {t("waiting")}
+                            </span>
+                          </>
+                        )}
+                        <span>
+                          {t("yourStatus")}:{" "}
+                          {registrationState === "registered"
+                            ? t("registered")
+                            : registrationState === "waiting"
+                              ? t("waiting")
+                              : t("notRegistered")}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  {isLive && (
+                    <div className="live-banner">
+                      <span className="live-dot" aria-hidden="true" />
+                      <strong>{t("liveGameDay")}</strong>
+                    </div>
+                  )}
+                  <div className="home-shortcuts">
+                    <button
+                      className="primary-button"
+                      onClick={() => {
+                        setGamePane(isLive ? "matches" : "registration");
+                        openSection("game");
+                      }}
+                    >
+                      {isLive ? t("enterLiveGameDay") : t("gameDay")}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() => {
+                        setGroupPane("members");
+                        openSection("group");
+                      }}
+                    >
+                      {t("navGroup")}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={() => {
+                        if (isLive || finishedGameDay) setStatsScope("day");
+                        openSection("stats");
+                      }}
+                    >
+                      {t("navStats")}
+                    </button>
+                  </div>
+                  <div className="home-updates">
+                    <h3>{t("recentUpdates")}</h3>
+                    {isAdmin && joinRequests.length > 0 && (
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setGroupPane("manage");
+                          openSection("group");
+                        }}
+                      >
+                        {t("pendingJoinRequests")} ({joinRequests.length})
+                      </button>
+                    )}
+                    {group.survey?.status === "open" && (
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setGroupPane("ratings");
+                          openSection("group");
+                        }}
+                      >
+                        {t("ratingSurvey")}
+                      </button>
+                    )}
+                    {latestMessage && (
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setGroupPane("chat");
+                          openSection("group");
+                        }}
+                      >
+                        <strong>{latestMessage.sender_name}:</strong>{" "}
+                        {latestMessage.message}
+                      </button>
+                    )}
+                    {finishedGameDay && (
+                      <button
+                        className="text-button"
+                        onClick={() => openSection("stats")}
+                      >
+                        {finishedGameDay.champion_team_name
+                          ? `${t("champion")}: ${championLabel(
+                              finishedTeamNames,
+                              finishedGameDay.champion_team_name
+                            )}`
+                          : t("history")}
+                      </button>
+                    )}
+                    {!latestMessage &&
+                      joinRequests.length === 0 &&
+                      group.survey?.status !== "open" &&
+                      !finishedGameDay && <p className="muted-text">{t("noRecentUpdates")}</p>}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+
+          {section === "settings" && (
+          <section className="card">
             <div className="section-header">
               <div>
                 <h2>{t("myGroups")}</h2>
@@ -2350,35 +2526,13 @@ function App() {
               </button>
             </div>
           </section>
+          )}
 
-          {group && isMember && (
-            <section className="card group-title-card group-page-only">
+          {section === "group" && group && isMember && (
+            <section className="card group-title-card">
               <div className="group-title-row">
                 <h2>{group.name}</h2>
                 <div className="header-actions">
-                  {isLive && (
-                    <button
-                      className="primary-button"
-                      onClick={() => {
-                        setTab("group");
-                        setLiveWorkspace(true);
-                      }}
-                    >
-                      {t("enterLiveGameDay")}
-                    </button>
-                  )}
-                  <button
-                    className={tab === "group" ? "primary-button" : "secondary-button"}
-                    onClick={() => setTab("group")}
-                  >
-                    {t("gameDay")}
-                  </button>
-                  <button
-                    className={tab === "stats" ? "primary-button" : "secondary-button"}
-                    onClick={() => setTab("stats")}
-                  >
-                    {t("statistics")}
-                  </button>
                   <div className="group-actions-wrapper">
                     <button
                       className="secondary-button"
@@ -2397,6 +2551,7 @@ function App() {
                           onClick={() => {
                             setShowGroupActions(false);
                             if (isSoleRealAdmin) {
+                              setGroupPane("manage");
                               setShowExitOptions(true);
                             } else if (window.confirm(t("leaveConfirm"))) {
                               leaveGroup();
@@ -2426,10 +2581,63 @@ function App() {
                   </div>
                 </div>
               </div>
+              <div className="section-tabs" role="tablist">
+                {(
+                  [
+                    ["members", t("members")],
+                    ["ratings", t("ratings")],
+                    ["manage", t("manage")],
+                    ["chat", t("chat")],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={groupPane === key}
+                    className={
+                      groupPane === key ? "primary-button" : "secondary-button"
+                    }
+                    onClick={() => setGroupPane(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </section>
           )}
 
-          {group && isMember && showExitOptions && isSoleRealAdmin && (
+          {section === "group" && groupPane === "manage" && group && isMember && (
+            <section className="card">
+              <h2>{t("groupActions")}</h2>
+              <div className="form-actions">
+                <button
+                  className="text-danger-button"
+                  onClick={() => {
+                    if (isSoleRealAdmin) {
+                      setShowExitOptions(true);
+                    } else if (window.confirm(t("leaveConfirm"))) {
+                      leaveGroup();
+                    }
+                  }}
+                >
+                  {t("leaveGroup")}
+                </button>
+                {isAdmin && (
+                  <button className="danger-button" onClick={deleteGroup}>
+                    {t("deleteGroup")}
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
+
+          {section === "group" &&
+            groupPane === "manage" &&
+            group &&
+            isMember &&
+            showExitOptions &&
+            isSoleRealAdmin && (
             <section className="card exit-options group-page-only" aria-live="polite">
               <h2>{t("soleAdminExitTitle")}</h2>
               <p>{t("soleAdminExitHelp")}</p>
@@ -2478,7 +2686,7 @@ function App() {
             </section>
           )}
 
-          {group && isAdmin && tab === "group" && (
+          {section === "group" && groupPane === "manage" && group && isAdmin && (
             <section className="card group-page-only">
               <h2>{t("invite")}</h2>
               <p>
@@ -2516,7 +2724,11 @@ function App() {
             </section>
           )}
 
-          {group && isAdmin && joinRequests.length > 0 && (
+          {section === "group" &&
+            groupPane === "manage" &&
+            group &&
+            isAdmin &&
+            joinRequests.length > 0 && (
             <section className="card group-page-only">
               <h2>{t("pendingJoinRequests")}</h2>
               {joinRequests.map((request) => (
@@ -2580,7 +2792,7 @@ function App() {
             </section>
           )}
 
-          {group && isMember && tab === "stats" && (
+          {section === "stats" && group && isMember && (
             <section className="card group-page-only">
               <div className="section-header">
                 <h2>{t("statistics")}</h2>
@@ -2618,9 +2830,19 @@ function App() {
             </section>
           )}
 
-          {group && isMember && tab === "group" && (
+          {section !== "home" && section !== "settings" && !(group && isMember) && (
+            <section className="card">
+              <p>{t("chooseGroup")}</p>
+              <button className="primary-button" onClick={() => openSection("settings")}>
+                {t("openProfile")}
+              </button>
+            </section>
+          )}
+
+          {group && isMember && section !== "settings" && (
             <>
-              <section className="card group-chat-card group-page-only">
+              {section === "group" && groupPane === "chat" && (
+              <section className="card group-chat-card">
                 <div
                   className="section-header collapsible-header"
                   role="button"
@@ -2698,8 +2920,38 @@ function App() {
                   </>
                 )}
               </section>
+              )}
 
-              <section className="card group-page-only">
+              {section === "game" && (
+                <section className="card">
+                  <h2>{t("gameDay")}</h2>
+                  <div className="section-tabs" role="tablist">
+                    {(
+                      [
+                        ["registration", t("registration")],
+                        ["teams", t("teams")],
+                        ["matches", t("matches")],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        role="tab"
+                        aria-selected={gamePane === key}
+                        className={
+                          gamePane === key ? "primary-button" : "secondary-button"
+                        }
+                        onClick={() => setGamePane(key)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {section === "game" && gamePane === "registration" && (
+              <section className="card">
                 <h2>{t("nextGameDay")}</h2>
                 {!gameDay ? (
                   <>
@@ -2900,10 +3152,9 @@ function App() {
                         )}
                       </>
                     )}
-                    {isAdmin && gameDay.status !== "finished" && (
+                    {isAdmin && gameDay.status === "upcoming" && (
                       <div className="form-actions">
-                        {gameDay.status === "upcoming" &&
-                          gameDay.teams.length > 0 && (
+                        {gameDay.teams.length > 0 && (
                           <button
                             className="primary-button"
                             onClick={() =>
@@ -2916,21 +3167,6 @@ function App() {
                             }
                           >
                             {t("startGameDay")}
-                          </button>
-                        )}
-                        {gameDay.status === "live" && (
-                          <button
-                            className="primary-button"
-                            onClick={() =>
-                              runAction(() =>
-                                apiFetch(
-                                  `/groups/${group.id}/game-days/${gameDay.id}/finish`,
-                                  { method: "POST" }
-                                )
-                              )
-                            }
-                          >
-                            {t("finishGameDay")}
                           </button>
                         )}
                         <button
@@ -2955,89 +3191,53 @@ function App() {
                   </>
                 )}
               </section>
+              )}
 
-              {isLive && (
-                <section className="card live-board live-workspace-only">
-                  <div className="live-workspace-header">
-                    <div>
-                      <button
-                        className="secondary-button"
-                        onClick={() => setLiveWorkspace(false)}
-                      >
-                        ← {t("backToGroup")}
-                      </button>
-                      <h2>{group.name}</h2>
-                    </div>
-                    {isAdmin && gameDay && (
-                      <div className="form-actions">
-                        <button
-                          className="primary-button"
-                          onClick={() =>
-                            runAction(() =>
-                              apiFetch(
-                                `/groups/${group.id}/game-days/${gameDay.id}/finish`,
-                                { method: "POST" }
-                              )
-                            )
-                          }
-                        >
-                          {t("finishGameDay")}
-                        </button>
-                        <button
-                          className="danger-button"
-                          onClick={() =>
-                            runAction(() =>
-                              apiFetch(
-                                `/groups/${group.id}/game-days/${gameDay.id}`,
-                                { method: "DELETE" }
-                              )
-                            ).then(() =>
-                              setGroup((current) =>
-                                current ? { ...current, game_day: null } : current
-                              )
-                            )
-                          }
-                        >
-                          {t("deleteGameDay")}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+              {section === "game" && isLive && gameDay && (
+                <section className="card live-board">
                   <div className="live-banner">
                     <span className="live-dot" aria-hidden="true" />
                     <strong>{t("liveGameDay")}</strong>
                   </div>
-                  <div className="live-tabs">
-                    {(
-                      [
-                        ["matches", t("matches")],
-                        ["standings", t("standings")],
-                        ["stats", t("dayStatistics")],
-                        ["teams", t("teams")],
-                      ] as const
-                    ).map(([key, caption]) => (
+                  {isAdmin && (
+                    <div className="form-actions">
                       <button
-                        key={key}
-                        className={
-                          liveTab === key ? "primary-button" : "secondary-button"
+                        className="primary-button"
+                        onClick={() =>
+                          runAction(() =>
+                            apiFetch(
+                              `/groups/${group.id}/game-days/${gameDay.id}/finish`,
+                              { method: "POST" }
+                            )
+                          )
                         }
-                        onClick={() => setLiveTab(key)}
                       >
-                        {caption}
+                        {t("finishGameDay")}
                       </button>
-                    ))}
-                  </div>
+                      <button
+                        className="danger-button"
+                        onClick={() =>
+                          runAction(() =>
+                            apiFetch(
+                              `/groups/${group.id}/game-days/${gameDay.id}`,
+                              { method: "DELETE" }
+                            )
+                          ).then(() =>
+                            setGroup((current) =>
+                              current ? { ...current, game_day: null } : current
+                            )
+                          )
+                        }
+                      >
+                        {t("deleteGameDay")}
+                      </button>
+                    </div>
+                  )}
                 </section>
               )}
 
-              {isLive && liveTab === "stats" && (
-                <section className="card live-workspace-only">
-                  <h2>{t("dayStatistics")}</h2>
-                  {dayStatsRows}
-                </section>
-              )}
-
-              <section className="card group-page-only">
+              {section === "group" && groupPane === "members" && (
+              <section className="card">
                 <div
                   className="section-header collapsible-header"
                   role="button"
@@ -3336,8 +3536,12 @@ function App() {
                   </>
                 )}
               </section>
+              )}
 
-              {gameDay && gameDay.status === "upcoming" && (
+              {section === "game" &&
+                gamePane === "registration" &&
+                gameDay &&
+                gameDay.status === "upcoming" && (
                 <section className="card group-page-only">
                   <h2>{t("gameRegistration")}</h2>
                   <div className="registration-columns">
@@ -3400,14 +3604,8 @@ function App() {
                 </section>
               )}
 
-              {gameDay && (!isLive || liveTab === "teams") && (
-                <section
-                  className={
-                    isLive
-                      ? "card live-workspace-only"
-                      : "card group-page-only"
-                  }
-                >
+              {section === "game" && gamePane === "teams" && gameDay && (
+                <section className="card">
                   <h2>{t("generateTeams")}</h2>
                   {isAdmin && (
                     <button
@@ -3603,8 +3801,8 @@ function App() {
                 </section>
               )}
 
-              {isLive && liveTab === "matches" && gameDay && (
-                <section className="card live-workspace-only">
+              {section === "game" && gamePane === "matches" && isLive && gameDay && (
+                <section className="card">
                   <h2>{t("matches")}</h2>
                   {isAdmin && teamNames.length >= 2 && (
                     <div className="form-panel">
@@ -4227,24 +4425,26 @@ function App() {
                 </section>
               )}
 
-              {gameDay &&
+              {section === "game" && gamePane === "matches" && !isLive && (
+                <section className="card">
+                  <h2>{t("matches")}</h2>
+                  <p>{t("matchesWhenLive")}</p>
+                </section>
+              )}
+
+              {section === "game" &&
+                gamePane === "matches" &&
+                gameDay &&
                 !gameDay.is_rotating &&
-                gameDay.standings.length > 0 &&
-                (!isLive || liveTab === "standings") && (
-                <section
-                  className={
-                    isLive
-                      ? "card live-workspace-only"
-                      : "card group-page-only"
-                  }
-                >
+                gameDay.standings.length > 0 && (
+                <section className="card">
                   <h2>{t("standings")}</h2>
                   {standingsTable(gameDay.standings, currentTeamNames)}
                 </section>
               )}
 
-              {finishedGameDay && (
-                <section className="card celebration-card group-page-only">
+              {section === "stats" && finishedGameDay && (
+                <section className="card celebration-card">
                   {!finishedGameDay.is_rotating &&
                     finishedGameDay.champion_team_name && (
                       <>
@@ -4362,7 +4562,8 @@ function App() {
                 </section>
               )}
 
-              <section className="card group-page-only">
+              {section === "group" && groupPane === "ratings" && (
+              <section className="card">
                 <h2>{t("ratingSurvey")}</h2>
                 {group.survey?.status === "open" ? (
                   <>
@@ -4481,8 +4682,9 @@ function App() {
                   </>
                 )}
               </section>
+              )}
 
-              {group.history.length > 0 && (
+              {section === "stats" && group.history.length > 0 && (
                 <section className="card group-page-only">
                   <h2>{t("history")}</h2>
                   {group.history.map((item) => (
@@ -4512,6 +4714,26 @@ function App() {
           )}
         </main>
       </div>
+      <nav className="bottom-nav" aria-label={t("appName")}>
+        {(
+          [
+            ["home", t("navHome")],
+            ["game", t("gameDay")],
+            ["group", t("navGroup")],
+            ["stats", t("navStats")],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={section === key ? "bottom-nav-button active" : "bottom-nav-button"}
+            aria-current={section === key ? "page" : undefined}
+            onClick={() => openSection(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }
