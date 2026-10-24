@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import "./App.css";
-import { supabase } from "./supabase";
+import { supabase, authCallback } from "./supabase";
+import { recoveryFailureKey, passwordUpdateError } from "./authRecovery";
 import { translations, type Language } from "./i18n";
 import { championLabel, teamDisplayNames, teamLabel } from "./teamNames";
 import { PlayerAvatar, ReigningTitlesProvider } from "./PlayerAvatar";
@@ -541,6 +542,50 @@ type MainSection = "home" | "game" | "group" | "stats" | "settings";
 type GamePane = "registration" | "teams" | "matches";
 type GroupPane = "members" | "ratings" | "manage" | "chat";
 
+function PasswordField({
+  value,
+  onChange,
+  shown,
+  onToggle,
+  showLabel,
+  hideLabel,
+  autoComplete,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  shown: boolean;
+  onToggle: () => void;
+  showLabel: string;
+  hideLabel: string;
+  autoComplete: string;
+}) {
+  return (
+    <div className="password-field">
+      <input
+        type={shown ? "text" : "password"}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        minLength={6}
+        required
+        autoComplete={autoComplete}
+      />
+      <button
+        className="password-toggle"
+        type="button"
+        aria-label={shown ? hideLabel : showLabel}
+        aria-pressed={shown}
+        onClick={onToggle}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+          <circle cx="12" cy="12" r="3" />
+          {shown && <path d="M4 4 20 20" />}
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 function App() {
   const [lang, setLang] = useState<Language>(loadLang);
   const t = (key: string) => translations[lang][key] ?? key;
@@ -553,13 +598,18 @@ function App() {
   const [actAs, setActAs] = useState<string | null>(loadActAs);
   const [simulatedName, setSimulatedName] = useState("");
 
-  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authMode, setAuthMode] = useState<"login" | "signup" | "forgot">("login");
   const [signupFirstName, setSignupFirstName] = useState("");
   const [signupLastName, setSignupLastName] = useState("");
   const [signupNickname, setSignupNickname] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [recoveryEmailSent, setRecoveryEmailSent] = useState(false);
+  const [passwordRecovery, setPasswordRecovery] = useState(
+    () => authCallback.recovery && !recoveryFailureKey(authCallback)
+  );
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [section, setSection] = useState<MainSection>("home");
   const [gamePane, setGamePane] = useState<GamePane>("registration");
@@ -641,7 +691,10 @@ function App() {
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => {
+    const key = recoveryFailureKey(authCallback);
+    return key ? translations[loadLang()][key] : "";
+  });
   const [now, setNow] = useState(new Date());
 
   const isMember = membership?.state === "member";
@@ -1116,17 +1169,40 @@ function App() {
   }
 
   useEffect(() => {
+    let active = true;
     supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
       setSession(data.session);
       setAuthReady(true);
+      if (authCallback.recovery && !data.session) {
+        setPasswordRecovery(false);
+        setError((current) => current || translations[loadLang()].recoveryLinkInvalid);
+      }
+      const hash = window.location.hash;
+      if (
+        hash.includes("access_token=") ||
+        hash.includes("refresh_token=") ||
+        hash.includes("error=") ||
+        hash.includes("error_code=") ||
+        hash.includes("type=recovery")
+      ) {
+        const url = new URL(window.location.href);
+        url.hash = "";
+        window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}`);
+      }
     });
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    } = supabase.auth.onAuthStateChange((event, newSession) => {
+      if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+      if (event === "SIGNED_OUT") setPasswordRecovery(false);
       setSession(newSession);
       setAuthReady(true);
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -1386,12 +1462,51 @@ function App() {
     }
   }, [invitePreview]);
 
+  function returnToLogin() {
+    setError("");
+    setShowPassword(false);
+    setRecoveryEmailSent(false);
+    setAuthMode("login");
+  }
+
+  async function handlePasswordUpdate(event: FormEvent) {
+    event.preventDefault();
+    const validation = passwordUpdateError(password, confirmPassword);
+    if (validation) {
+      setError(t(validation));
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (updateError) throw updateError;
+      setPassword("");
+      setConfirmPassword("");
+      setShowPassword(false);
+      setPasswordRecovery(false);
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : t("passwordUpdateFailed"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleAuth(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
     setError("");
     try {
       const normalizedEmail = email.trim();
+      if (authMode === "forgot") {
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+          normalizedEmail,
+          { redirectTo: window.location.origin }
+        );
+        if (resetError) throw resetError;
+        setRecoveryEmailSent(true);
+        return;
+      }
       if (authMode === "signup") {
         const firstName = signupFirstName.trim();
         const lastName = signupLastName.trim();
@@ -1433,7 +1548,7 @@ function App() {
           : "";
       setError(
         authCode === "over_email_send_rate_limit"
-          ? t("signupRateLimited")
+          ? t(authMode === "forgot" ? "recoveryRateLimited" : "signupRateLimited")
           : err instanceof Error
             ? err.message
             : "Authentication failed"
@@ -1884,12 +1999,59 @@ function App() {
     return <div className="auth-shell">{t("loading")}</div>;
   }
 
+  if (passwordRecovery && session) {
+    return (
+      <div className="auth-shell">
+        <form className="auth-card" onSubmit={handlePasswordUpdate}>
+          <h1>⚽ {t("appName")}</h1>
+          <p>{t("chooseNewPassword")}</p>
+          {languageToggle}
+          <label>
+            {t("newPassword")}
+            <PasswordField
+              value={password}
+              onChange={setPassword}
+              shown={showPassword}
+              onToggle={() => setShowPassword((current) => !current)}
+              showLabel={t("showPassword")}
+              hideLabel={t("hidePassword")}
+              autoComplete="new-password"
+            />
+          </label>
+          <label>
+            {t("confirmPassword")}
+            <PasswordField
+              value={confirmPassword}
+              onChange={setConfirmPassword}
+              shown={showPassword}
+              onToggle={() => setShowPassword((current) => !current)}
+              showLabel={t("showPassword")}
+              hideLabel={t("hidePassword")}
+              autoComplete="new-password"
+            />
+          </label>
+          {error && <div className="error-box">{error}</div>}
+          <button className="primary-button" type="submit" disabled={loading}>
+            {t("updatePassword")}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   if (!session) {
+    const recoverySent = authMode === "forgot" && recoveryEmailSent;
     return (
       <div className="auth-shell">
         <form className="auth-card" onSubmit={handleAuth}>
           <h1>⚽ {t("appName")}</h1>
-          <p>{authMode === "login" ? t("loginSubtitle") : t("signupSubtitle")}</p>
+          <p>
+            {authMode === "signup"
+              ? t("signupSubtitle")
+              : authMode === "forgot"
+                ? t("forgotPasswordSubtitle")
+                : t("loginSubtitle")}
+          </p>
           {languageToggle}
           {authMode === "signup" && (
             <>
@@ -1918,51 +2080,68 @@ function App() {
               </label>
             </>
           )}
-          <label>
-            {t("email")}
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            {t("password")}
-            <div className="password-field">
+          {!recoverySent && (
+            <label>
+              {t("email")}
               <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                minLength={6}
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
                 required
+                autoComplete="email"
               />
-              <button
-                className="password-toggle"
-                type="button"
-                aria-label={t(showPassword ? "hidePassword" : "showPassword")}
-                aria-pressed={showPassword}
-                onClick={() => setShowPassword((current) => !current)}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
-                  <circle cx="12" cy="12" r="3" />
-                  {showPassword && <path d="M4 4 20 20" />}
-                </svg>
-              </button>
-            </div>
-          </label>
+            </label>
+          )}
+          {authMode !== "forgot" && (
+            <label>
+              {t("password")}
+              <PasswordField
+                value={password}
+                onChange={setPassword}
+                shown={showPassword}
+                onToggle={() => setShowPassword((current) => !current)}
+                showLabel={t("showPassword")}
+                hideLabel={t("hidePassword")}
+                autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+              />
+            </label>
+          )}
+          {authMode === "login" && (
+            <button
+              className="auth-text-button"
+              type="button"
+              onClick={() => {
+                setError("");
+                setShowPassword(false);
+                setRecoveryEmailSent(false);
+                setAuthMode("forgot");
+              }}
+            >
+              {t("forgotPassword")}
+            </button>
+          )}
+          {recoverySent && <p>{t("recoveryEmailSent")}</p>}
           {error && <div className="error-box">{error}</div>}
-          <button className="primary-button" type="submit" disabled={loading}>
-            {authMode === "login" ? t("logIn") : t("signUp")}
-          </button>
+          {!recoverySent && (
+            <button className="primary-button" type="submit" disabled={loading}>
+              {authMode === "forgot"
+                ? t("sendRecoveryEmail")
+                : authMode === "login"
+                  ? t("logIn")
+                  : t("signUp")}
+            </button>
+          )}
           <button
             className="secondary-button"
             type="button"
             onClick={() => {
-              setError("");
-              setShowPassword(false);
-              setAuthMode(authMode === "login" ? "signup" : "login");
+              if (authMode === "login") {
+                setError("");
+                setShowPassword(false);
+                setAuthMode("signup");
+                return;
+              }
+              returnToLogin();
             }}
           >
             {authMode === "login" ? t("createAccount") : t("backToLogin")}

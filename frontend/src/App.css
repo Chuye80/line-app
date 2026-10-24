@@ -1205,6 +1205,17 @@ button:disabled {
   border-radius: 8px;
 }
 
+.auth-text-button {
+  align-self: start;
+  margin-top: -8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  font-weight: 600;
+  text-align: start;
+}
+
 .password-field {
   position: relative;
   width: 100%;
