@@ -7,6 +7,7 @@ import { recoveryFailureKey, passwordUpdateError } from "./authRecovery";
 import { translations, type Language } from "./i18n";
 import { championLabel, teamDisplayNames, teamLabel } from "./teamNames";
 import { GroupPicture } from "./GroupPicture";
+import { formatKickoff } from "./kickoffFormat";
 import { PlayerAvatar, ReigningTitlesProvider } from "./PlayerAvatar";
 import { reigningTitles } from "./reigningTitles";
 import { removeAvatar, uploadAvatar } from "./avatarStorage";
@@ -2511,6 +2512,10 @@ function App() {
       value: (row) => row.mvps,
     },
   ];
+  const homeKickoffSource = gameDay ?? finishedGameDay;
+  const homeKickoff = homeKickoffSource
+    ? formatKickoff(homeKickoffSource.game_datetime, lang)
+    : null;
   const dayStatsRows = (
     <SortableStatisticsTable
       key="day"
@@ -2608,7 +2613,7 @@ function App() {
       </header>
 
       <div className="page-layout">
-        <main className="container app-main">
+        <main className={section === "home" ? "container app-main home-main" : "container app-main"}>
           {section === "settings" && (
             <section className="card profile-card">
               <h2>{t("myProfile")}</h2>
@@ -2877,21 +2882,10 @@ function App() {
           )}
 
           {section === "home" && (
-            <section className="card home-dashboard">
-              {group && isMember ? (
-                <div className="home-group-identity">
-                  <GroupPicture
-                    name={group.name}
-                    picturePath={group.picture_path}
-                    pictureVersion={group.picture_version}
-                  />
-                  <h2>{group.name}</h2>
-                </div>
-              ) : (
-                <h2>{t("navHome")}</h2>
-              )}
+            <div className="home-stack">
               {!(group && isMember) ? (
-                <>
+                <section className="card home-empty">
+                  <h2>{t("navHome")}</h2>
                   <p>{t("chooseGroup")}</p>
                   <button
                     className="primary-button"
@@ -2899,53 +2893,69 @@ function App() {
                   >
                     {t("myGroups")}
                   </button>
-                </>
+                </section>
               ) : (
                 <>
-                  <div className="home-summary">
-                    <span className="muted-text">{t("nextGameDay")}</span>
-                    {!gameDay ? (
-                      finishedGameDay ? (
-                        <strong>
-                          {t("flowFinished")} ·{" "}
-                          {new Date(finishedGameDay.game_datetime).toLocaleString()}
-                        </strong>
-                      ) : (
-                        <strong>{t("noGameDay")}</strong>
-                      )
+                  <section className="home-panel home-group-identity">
+                    <GroupPicture
+                      name={group.name}
+                      picturePath={group.picture_path}
+                      pictureVersion={group.picture_version}
+                    />
+                    <h2>{group.name}</h2>
+                  </section>
+                  <section className="home-panel home-next">
+                    <div className="home-next-heading">
+                      <span className="home-kicker">{t("nextGameDay")}</span>
+                      {(gameDay || finishedGameDay) && (
+                        <span
+                          className={`home-status home-status-${
+                            gameDay?.status ?? "finished"
+                          }`}
+                        >
+                          {gameDay
+                            ? statusLabel(gameDay.status)
+                            : t("statusFinished")}
+                        </span>
+                      )}
+                    </div>
+                    {!gameDay && !finishedGameDay ? (
+                      <p className="home-next-empty">{t("noGameDay")}</p>
                     ) : (
                       <>
-                        <strong>
-                          {statusLabel(gameDay.status)} ·{" "}
-                          {new Date(gameDay.game_datetime).toLocaleString()}
-                        </strong>
-                        {gameDay.status === "upcoming" && (
-                          <>
+                        <p className="home-next-date">{homeKickoff?.date}</p>
+                        <p className="home-next-time">{homeKickoff?.time}</p>
+                        {gameDay?.status === "upcoming" && (
+                          <div className="home-next-meta">
                             <span>{countdownText(gameDay)}</span>
                             <span>
                               {gameDay.participants.length}/{gameDay.participant_count}{" "}
                               {t("registered")} · {gameDay.waiting_list.length}{" "}
                               {t("waiting")}
                             </span>
-                          </>
+                          </div>
                         )}
-                        <span>
-                          {t("yourStatus")}:{" "}
-                          {registrationState === "registered"
-                            ? t("registered")
-                            : registrationState === "waiting"
-                              ? t("waiting")
-                              : t("notRegistered")}
-                        </span>
+                        {gameDay ? (
+                          <p className="home-next-you">
+                            {t("yourStatus")}:{" "}
+                            {registrationState === "registered"
+                              ? t("registered")
+                              : registrationState === "waiting"
+                                ? t("waiting")
+                                : t("notRegistered")}
+                          </p>
+                        ) : (
+                          <p className="home-next-you">{t("flowFinished")}</p>
+                        )}
+                        {isLive && (
+                          <div className="live-banner">
+                            <span className="live-dot" aria-hidden="true" />
+                            <strong>{t("liveGameDay")}</strong>
+                          </div>
+                        )}
                       </>
                     )}
-                  </div>
-                  {isLive && (
-                    <div className="live-banner">
-                      <span className="live-dot" aria-hidden="true" />
-                      <strong>{t("liveGameDay")}</strong>
-                    </div>
-                  )}
+                  </section>
                   {showMvpReminder && finishedGameDay && (
                     <div className="mvp-reminder">
                       <strong>{t("voteMvp")}</strong>
@@ -2959,92 +2969,90 @@ function App() {
                       </button>
                     </div>
                   )}
-                  <div className="home-shortcuts">
-                    <button
-                      className="primary-button"
-                      onClick={() => {
-                        setGamePane(isLive ? "matches" : "registration");
-                        openSection("game");
-                      }}
-                    >
-                      {isLive ? t("enterLiveGameDay") : t("gameDay")}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      onClick={() => {
-                        setGroupPane("members");
-                        openSection("group");
-                      }}
-                    >
-                      {t("navGroup")}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      onClick={() => {
-                        if (isLive || finishedGameDay) setStatsScope("day");
-                        openSection("stats");
-                      }}
-                    >
-                      {t("navStats")}
-                    </button>
-                  </div>
-                  <div className="home-updates">
+                  <section className="home-panel home-updates">
                     <h3>{t("recentUpdates")}</h3>
                     {isAdmin && joinRequests.length > 0 && (
                       <button
-                        className="text-button"
+                        type="button"
+                        className="home-update-row"
                         onClick={() => {
                           setGroupPane("manage");
                           openSection("group");
                         }}
                       >
-                        {t("pendingJoinRequests")} ({joinRequests.length})
+                        <span>
+                          {t("pendingJoinRequests")} ({joinRequests.length})
+                        </span>
+                        <span className="home-chevron" aria-hidden="true">
+                          ›
+                        </span>
                       </button>
                     )}
                     {group.survey?.status === "open" && (
                       <button
-                        className="text-button"
+                        type="button"
+                        className="home-update-row"
                         onClick={() => {
                           setGroupPane("ratings");
                           openSection("group");
                         }}
                       >
-                        {t("ratingSurvey")}
+                        <span>{t("ratingSurvey")}</span>
+                        <span className="home-chevron" aria-hidden="true">
+                          ›
+                        </span>
                       </button>
                     )}
                     {latestMessage && (
                       <button
-                        className="text-button"
+                        type="button"
+                        className="home-update-row"
                         onClick={() => {
                           setGroupPane("chat");
                           openSection("group");
                         }}
                       >
-                        <strong>{latestMessage.sender_name}:</strong>{" "}
-                        {latestMessage.message}
-                      </button>
-                    )}
-                    {finishedGameDay && (
-                      <button
-                        className="text-button"
-                        onClick={() => openSection("stats")}
-                      >
-                        {finishedGameDay.champion_team_name
-                          ? `${t("champion")}: ${championLabel(
-                              finishedTeamNames,
-                              finishedGameDay.champion_team_name
-                            )}`
-                          : t("history")}
+                        <span className="home-update-copy">
+                          <strong>{latestMessage.sender_name}</strong>
+                          <span>{latestMessage.message}</span>
+                        </span>
+                        <span className="home-chevron" aria-hidden="true">
+                          ›
+                        </span>
                       </button>
                     )}
                     {!latestMessage &&
-                      joinRequests.length === 0 &&
-                      group.survey?.status !== "open" &&
-                      !finishedGameDay && <p className="muted-text">{t("noRecentUpdates")}</p>}
-                  </div>
+                      !(isAdmin && joinRequests.length > 0) &&
+                      group.survey?.status !== "open" && (
+                        <p className="muted-text">{t("noRecentUpdates")}</p>
+                      )}
+                  </section>
+                  {finishedGameDay && (
+                    <button
+                      type="button"
+                      className="home-panel home-history"
+                      onClick={() => openSection("stats")}
+                    >
+                      <span className="home-history-copy">
+                        <strong>{t("history")}</strong>
+                        {finishedGameDay.champion_team_name && (
+                          <span>
+                            {t("champion")}:{" "}
+                            {championLabel(
+                              finishedTeamNames,
+                              finishedGameDay.champion_team_name
+                            )}
+                          </span>
+                        )}
+                      </span>
+                      <span className="home-chevron" aria-hidden="true">
+                        ›
+                      </span>
+                    </button>
+                  )}
                 </>
               )}
-            </section>
+            </div>
           )}
 
           {section === "settings" && (
