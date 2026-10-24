@@ -1,6 +1,20 @@
 import { supabase } from "./supabase";
 
 const BUCKET = "player-avatars";
+const signedUrlCache = new Map<string, Promise<string | null>>();
+
+export function signedAvatarUrl(path: string, version = 0): Promise<string | null> {
+  const key = `${path}:${version}`;
+  let pending = signedUrlCache.get(key);
+  if (!pending) {
+    pending = supabase.storage
+      .from(BUCKET)
+      .createSignedUrl(path, 3600)
+      .then(({ data, error }) => (error || !data ? null : data.signedUrl));
+    signedUrlCache.set(key, pending);
+  }
+  return pending;
+}
 
 export async function prepareAvatar(file: File): Promise<Blob> {
   if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {

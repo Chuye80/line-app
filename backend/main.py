@@ -109,6 +109,10 @@ class UpdateAvatarRequest(BaseModel):
     avatar_path: str | None = Field(default=None, max_length=500)
 
 
+class UpdateGroupPictureRequest(BaseModel):
+    picture_path: str | None = Field(default=None, max_length=500)
+
+
 class CreateGroupRequest(BaseModel):
     name: str = Field(min_length=1)
 
@@ -1386,6 +1390,8 @@ def group_to_dict(
     result = {
         "id": str(group.id),
         "name": group.name,
+        "picture_path": group.picture_path,
+        "picture_version": group.picture_version,
         "last_participant_count": group.last_participant_count,
         "last_players_per_team": group.last_players_per_team,
         "members": [
@@ -1687,6 +1693,25 @@ def get_group(
     user: CurrentUser = Depends(get_current_user),
 ):
     return read_group_payload(group_id, user.id)
+
+
+@app.put("/groups/{group_id}/picture")
+def update_group_picture(
+    group_id: UUID,
+    body: UpdateGroupPictureRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    group = get_group_or_404(db, group_id)
+    require_admin(db, group, user)
+    path = optional_name(body.picture_path)
+    expected_prefix = f"groups/{group.id}/picture/"
+    if path is not None and not valid_avatar_path(path, expected_prefix):
+        raise HTTPException(status_code=400, detail="Invalid group picture path")
+    group.picture_path = path
+    group.picture_version += 1
+    db.commit()
+    return read_group_payload(group.id, user.id)
 
 
 @app.get("/groups/{group_id}/messages")

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { supabase } from "./supabase";
+import { signedAvatarUrl } from "./avatarStorage";
 import { avatarInitials, type ProfileIdentity } from "./profileUtils";
 import championFrame from "./assets/champion-frame.png";
 import mvpCrown from "./assets/mvp-crown.png";
@@ -9,8 +9,6 @@ import {
   type ReigningTitles,
 } from "./reigningTitles";
 
-const BUCKET = "player-avatars";
-const signedUrlCache = new Map<string, Promise<string | null>>();
 const emptyTitles: ReigningTitles = {
   championIds: new Set(),
   mvpIds: new Set(),
@@ -38,19 +36,6 @@ type AvatarIdentity = ProfileIdentity & {
   avatar_path?: string | null;
   avatar_version?: number;
 };
-
-function signedAvatarUrl(path: string, version = 0): Promise<string | null> {
-  const key = `${path}:${version}`;
-  let pending = signedUrlCache.get(key);
-  if (!pending) {
-    pending = supabase.storage
-      .from(BUCKET)
-      .createSignedUrl(path, 3600)
-      .then(({ data, error }) => (error ? null : data.signedUrl));
-    signedUrlCache.set(key, pending);
-  }
-  return pending;
-}
 
 export function PlayerAvatar({
   player,

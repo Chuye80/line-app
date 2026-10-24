@@ -1837,6 +1837,46 @@ button:disabled {
   min-height: 44px;
 }
 
+.home-group-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.home-group-identity h2 {
+  margin: 0;
+  min-width: 0;
+}
+
+.group-picture {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.group-picture img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.group-picture-editor {
+  width: 76px;
+  height: 76px;
+  font-size: 24px;
+}
+
 .home-summary,
 .home-updates {
   display: flex;

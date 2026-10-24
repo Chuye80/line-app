@@ -6,6 +6,7 @@ import { supabase, authCallback } from "./supabase";
 import { recoveryFailureKey, passwordUpdateError } from "./authRecovery";
 import { translations, type Language } from "./i18n";
 import { championLabel, teamDisplayNames, teamLabel } from "./teamNames";
+import { GroupPicture } from "./GroupPicture";
 import { PlayerAvatar, ReigningTitlesProvider } from "./PlayerAvatar";
 import { reigningTitles } from "./reigningTitles";
 import { removeAvatar, uploadAvatar } from "./avatarStorage";
@@ -286,6 +287,8 @@ type Group = {
   invite_code?: string;
   invite_link?: string;
   join_requests?: JoinRequest[];
+  picture_path?: string | null;
+  picture_version?: number;
 };
 
 type MyGroup = {
@@ -1683,6 +1686,57 @@ function App() {
     await removeAvatar(owner.avatar_path);
   }
 
+  async function persistGroupPicture(path: string | null) {
+    if (!group) throw new Error(t("groupPictureUploadFailed"));
+    const response = await apiFetch(`/groups/${group.id}/picture`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ picture_path: path }),
+    });
+    if (!response.ok) throw new Error(await parseError(response));
+    const updated = (await response.json()) as Group;
+    setGroup(updated);
+    return updated;
+  }
+
+  async function saveGroupPicture(file: File) {
+    if (!group) return;
+    setLoading(true);
+    setError("");
+    let newPath: string | null = null;
+    const previous = group.picture_path;
+    try {
+      newPath = await uploadAvatar(`groups/${group.id}/picture/`, file);
+      await persistGroupPicture(newPath);
+      await removeAvatar(previous);
+    } catch (err) {
+      if (newPath) await removeAvatar(newPath);
+      setError(
+        err instanceof Error ? err.message : t("groupPictureUploadFailed")
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function clearGroupPicture() {
+    if (!group?.picture_path) return;
+    const previous = group.picture_path;
+    setLoading(true);
+    setError("");
+    try {
+      await persistGroupPicture(null);
+      await removeAvatar(previous);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t("groupPictureUploadFailed")
+      );
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function sendGroupMessage(event: FormEvent) {
     event.preventDefault();
     const message = chatDraft.trim();
@@ -1899,6 +1953,13 @@ function App() {
 
   async function deleteGroup() {
     if (!group || !window.confirm(t("deleteGroupConfirm"))) return;
+    if (group.picture_path) {
+      try {
+        await clearGroupPicture();
+      } catch {
+        return;
+      }
+    }
     await runAction(
       () =>
         apiFetch(`/groups/${group.id}`, {
@@ -2817,7 +2878,18 @@ function App() {
 
           {section === "home" && (
             <section className="card home-dashboard">
-              <h2>{group && isMember ? group.name : t("navHome")}</h2>
+              {group && isMember ? (
+                <div className="home-group-identity">
+                  <GroupPicture
+                    name={group.name}
+                    picturePath={group.picture_path}
+                    pictureVersion={group.picture_version}
+                  />
+                  <h2>{group.name}</h2>
+                </div>
+              ) : (
+                <h2>{t("navHome")}</h2>
+              )}
               {!(group && isMember) ? (
                 <>
                   <p>{t("chooseGroup")}</p>
@@ -3170,6 +3242,44 @@ function App() {
                 >
                   {t("cancel")}
                 </button>
+              </div>
+            </section>
+          )}
+
+          {section === "group" && groupPane === "manage" && group && isAdmin && (
+            <section className="card group-page-only">
+              <h2>{t("groupPicture")}</h2>
+              <div className="profile-avatar-editor">
+                <GroupPicture
+                  name={group.name}
+                  picturePath={group.picture_path}
+                  pictureVersion={group.picture_version}
+                  size="editor"
+                />
+                <div className="form-actions">
+                  <label className="secondary-button file-button">
+                    {t("choosePicture")}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) saveGroupPicture(file);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                  {group.picture_path && (
+                    <button
+                      className="text-danger-button"
+                      onClick={() => {
+                        clearGroupPicture().catch(() => {});
+                      }}
+                    >
+                      {t("removePicture")}
+                    </button>
+                  )}
+                </div>
               </div>
             </section>
           )}

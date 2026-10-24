@@ -67,6 +67,8 @@ class Group(Base):
     created_by: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = created_at_col()
     invite_code: Mapped[str] = mapped_column(Text, nullable=False)
+    picture_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    picture_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_participant_count: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
     last_players_per_team: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
 

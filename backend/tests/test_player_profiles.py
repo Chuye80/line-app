@@ -61,9 +61,13 @@ def test_private_avatar_bucket_and_storage_policies_are_installed(sql):
             """
         )
         assert {row[0] for row in cur.fetchall()} == {
+            "group admins delete group pictures",
             "group admins delete player avatars",
+            "group admins insert group pictures",
             "group admins insert player avatars",
+            "group admins update group pictures",
             "group admins update player avatars",
+            "group pictures read",
             "player avatars read",
             "registered users write own avatar",
         }
