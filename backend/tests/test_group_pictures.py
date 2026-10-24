@@ -167,6 +167,23 @@ def test_group_picture_storage_policies_allow_members_to_read_and_admins_to_writ
                 """,
                 (picture,),
             )
+            for rejected in (
+                f"groups/{group_id}/picture/foo/{uuid.uuid4()}.webp",
+                f"groups/{group_id}/picture/foo/bar/{uuid.uuid4()}.webp",
+                f"groups/{group_id}/picture/{uuid.uuid4()}.png",
+            ):
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO storage.objects (bucket_id, name)
+                        VALUES ('player-avatars', %s)
+                        """,
+                        (rejected,),
+                    )
+                except psycopg2.errors.InsufficientPrivilege:
+                    pass
+                else:
+                    raise AssertionError(f"storage accepted {rejected}")
             cur.execute("reset role")
 
             as_user(member_id)

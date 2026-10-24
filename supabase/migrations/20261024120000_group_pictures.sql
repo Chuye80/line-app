@@ -203,6 +203,10 @@ begin
     return;
   end if;
 
+  -- foldername() omits only the object filename. A nested key such as
+  -- groups/{id}/picture/foo/bar.webp still has its third segment equal to
+  -- picture, so the policies also require exactly three folder segments and a
+  -- .webp filename: groups/{groupId}/picture/{filename}.webp.
   execute 'drop policy if exists "group pictures read" on storage.objects';
   execute 'drop policy if exists "group admins insert group pictures" on storage.objects';
   execute 'drop policy if exists "group admins update group pictures" on storage.objects';
@@ -215,6 +219,8 @@ begin
       bucket_id = 'player-avatars'
       and (storage.foldername(name))[1] = 'groups'
       and (storage.foldername(name))[3] = 'picture'
+      and array_length(storage.foldername(name), 1) = 3
+      and name like '%.webp'
       and private.lineapp_can_access_group_picture(
         (storage.foldername(name))[2],
         false
@@ -229,6 +235,8 @@ begin
       bucket_id = 'player-avatars'
       and (storage.foldername(name))[1] = 'groups'
       and (storage.foldername(name))[3] = 'picture'
+      and array_length(storage.foldername(name), 1) = 3
+      and name like '%.webp'
       and private.lineapp_can_access_group_picture(
         (storage.foldername(name))[2],
         true
@@ -243,6 +251,8 @@ begin
       bucket_id = 'player-avatars'
       and (storage.foldername(name))[1] = 'groups'
       and (storage.foldername(name))[3] = 'picture'
+      and array_length(storage.foldername(name), 1) = 3
+      and name like '%.webp'
       and private.lineapp_can_access_group_picture(
         (storage.foldername(name))[2],
         true
@@ -252,6 +262,8 @@ begin
       bucket_id = 'player-avatars'
       and (storage.foldername(name))[1] = 'groups'
       and (storage.foldername(name))[3] = 'picture'
+      and array_length(storage.foldername(name), 1) = 3
+      and name like '%.webp'
       and private.lineapp_can_access_group_picture(
         (storage.foldername(name))[2],
         true
@@ -266,6 +278,8 @@ begin
       bucket_id = 'player-avatars'
       and (storage.foldername(name))[1] = 'groups'
       and (storage.foldername(name))[3] = 'picture'
+      and array_length(storage.foldername(name), 1) = 3
+      and name like '%.webp'
       and private.lineapp_can_access_group_picture(
         (storage.foldername(name))[2],
         true
