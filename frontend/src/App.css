@@ -1884,7 +1884,7 @@ html[dir="rtl"] .group-switch-menu {
   align-items: center;
   gap: 14px;
   margin: 0;
-  padding: 12px 16px;
+  padding: 10px 16px;
 }
 
 .home-group-identity h2 {
@@ -1972,7 +1972,7 @@ html[dir="rtl"] .home-updates h3 {
 }
 
 .home-next-time {
-  margin-top: 2px;
+  margin-top: 0;
   color: #24344d;
   font-size: 1.05rem;
   font-weight: 600;
@@ -1994,23 +1994,17 @@ html[dir="rtl"] .home-updates h3 {
 }
 
 .home-next-you {
-  margin-top: 8px;
+  margin-top: 4px;
   color: #5c6b80;
   font-size: 0.92rem;
 }
 
 .home-next .live-banner {
-  margin-top: 12px;
+  margin-top: 8px;
   color: #1b6b45;
   font-size: 0.92rem;
   letter-spacing: 0;
   text-transform: none;
-}
-
-.home-next .live-dot {
-  background: #1b6b45;
-  box-shadow: none;
-  animation: none;
 }
 
 .home-updates {

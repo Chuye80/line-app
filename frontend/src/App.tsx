@@ -2907,17 +2907,15 @@ function App() {
                   <section className="home-panel home-next">
                     <div className="home-next-heading">
                       <span className="home-kicker">{t("nextGameDay")}</span>
-                      {(gameDay || finishedGameDay) && (
-                        <span
-                          className={`home-status home-status-${
-                            gameDay?.status ?? "finished"
-                          }`}
-                        >
-                          {gameDay
-                            ? statusLabel(gameDay.status)
-                            : t("statusFinished")}
+                      {gameDay && gameDay.status !== "live" ? (
+                        <span className={`home-status home-status-${gameDay.status}`}>
+                          {statusLabel(gameDay.status)}
                         </span>
-                      )}
+                      ) : !gameDay && finishedGameDay ? (
+                        <span className="home-status home-status-finished">
+                          {t("statusFinished")}
+                        </span>
+                      ) : null}
                     </div>
                     {!gameDay && !finishedGameDay ? (
                       <p className="home-next-empty">{t("noGameDay")}</p>
