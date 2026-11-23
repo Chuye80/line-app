@@ -207,7 +207,7 @@ export function Confetti({
 
 /* ---------- Medal ladder ---------- */
 
-export const MEDAL_TIERS = [
+const MEDAL_TIERS = [
   { key: "stone", label: "medalStone", from: "#aab0b5", to: "#6d7479" },
   { key: "bronze", label: "medalBronze", from: "#e0a066", to: "#a8642b" },
   { key: "silver", label: "medalSilver", from: "#eef2f6", to: "#aab4bf" },

@@ -6,6 +6,9 @@
 .app {
   min-height: 100dvh;
   background: var(--bg);
+  /* Champion wreaths and crowns paint outside their avatar; never let that
+     widen the page on a phone. */
+  overflow-x: clip;
 }
 
 /* ---------- Buttons ---------- */
@@ -618,18 +621,20 @@ html[dir="rtl"] .chevron.expanded {
 }
 
 .section-tabs button {
-  flex: 1 0 auto;
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   min-height: 44px;
-  padding: 0 16px;
+  padding: 0 8px;
+  white-space: nowrap;
   border: 0;
   border-radius: 12px;
   background: transparent;
   color: var(--ink-2);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   box-shadow: none;
   transition:
@@ -1762,6 +1767,8 @@ html[dir="rtl"] .statistics-table td:first-child {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
+  min-height: 132px;
   gap: 8px;
   padding: 14px 8px 12px;
   border: 2px solid var(--line);
@@ -2496,4 +2503,14 @@ html[dir="rtl"] .chat-message.own {
   .auth-card {
     animation: none;
   }
+}
+
+/* The header avatar stays a clean circle even for reigning champions. */
+.avatar-button .player-avatar {
+  margin: 0 !important;
+}
+
+.avatar-button .player-avatar-frame,
+.avatar-button .player-avatar-crown {
+  display: none;
 }

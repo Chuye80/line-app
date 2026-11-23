@@ -2410,54 +2410,55 @@ function App() {
     </div>
   );
   // One primary button on Home, chosen by what this person can do right now.
-  const homeCta: { label: string; run: () => void } | null = (() => {
+  // Pure data here; the click handler below does the work.
+  type HomeCtaKind = "live" | "register" | "guide" | "create";
+  const homeCtaKind: HomeCtaKind | null = (() => {
     if (!group || !isMember) return null;
-    if (gameDay && isLive) {
-      return {
-        label: t("enterLiveGameDay"),
-        run: () => {
-          setGamePane("matches");
-          openSection("game");
-        },
-      };
-    }
+    if (gameDay && isLive) return "live";
     if (
       gameDay?.status === "upcoming" &&
       registrationState === "out" &&
       currentMembership &&
       gameDay.participants.length < gameDay.participant_count
     ) {
-      return {
-        label: t("register"),
-        run: () => {
-          setBurst((current) => current + 1);
-          void setGameDayRegistration(currentMembership.id, true);
-        },
-      };
+      return "register";
     }
-    const action = guide.actions[0];
-    if (action) {
-      return {
-        label: t(guideActionLabel[action]),
-        run: () => {
-          if (action !== "voteMvp" && action !== "viewResults") {
-            openSection("game");
-          }
-          runGuideAction(action);
-        },
-      };
+    // The MVP reminder card below already carries its own vote button.
+    if (guide.actions[0] && !(guide.actions[0] === "voteMvp" && showMvpReminder)) {
+      return "guide";
     }
-    if (!gameDay && isAdmin) {
-      return {
-        label: t("createGameDay"),
-        run: () => {
-          setGamePane("registration");
-          openSection("game");
-        },
-      };
-    }
+    if (!gameDay && isAdmin) return "create";
     return null;
   })();
+  const homeCtaLabel =
+    homeCtaKind === "live"
+      ? t("enterLiveGameDay")
+      : homeCtaKind === "register"
+        ? t("register")
+        : homeCtaKind === "guide" && guide.actions[0]
+          ? t(guideActionLabel[guide.actions[0]])
+          : homeCtaKind === "create"
+            ? t("createGameDay")
+            : "";
+  function runHomeCta() {
+    if (homeCtaKind === "live") {
+      setGamePane("matches");
+      openSection("game");
+    } else if (homeCtaKind === "register" && currentMembership) {
+      setBurst((current) => current + 1);
+      void setGameDayRegistration(currentMembership.id, true);
+    } else if (homeCtaKind === "guide") {
+      const action = guide.actions[0];
+      if (!action) return;
+      if (action !== "voteMvp" && action !== "viewResults") {
+        openSection("game");
+      }
+      runGuideAction(action);
+    } else if (homeCtaKind === "create") {
+      setGamePane("registration");
+      openSection("game");
+    }
+  }
   const latestMessage = chatMessages[0] ?? null;
   const dayStatisticsRows: StatisticsTableRow[] = dayStats.map((row) => ({
     id: row.member.id,
@@ -3036,13 +3037,13 @@ function App() {
                         )}
                       </>
                     )}
-                    {homeCta && (
+                    {homeCtaKind && (
                       <button
                         type="button"
                         className="primary-button home-cta"
-                        onClick={homeCta.run}
+                        onClick={runHomeCta}
                       >
-                        {homeCta.label}
+                        {homeCtaLabel}
                       </button>
                     )}
                   </section>
@@ -3780,7 +3781,8 @@ function App() {
                   <>
                     <p>
                       <strong>{statusLabel(gameDay.status)}</strong> · {t("kickoff")}:{" "}
-                      {new Date(gameDay.game_datetime).toLocaleString()}
+                      {formatKickoff(gameDay.game_datetime, lang).date} ·{" "}
+                      {formatKickoff(gameDay.game_datetime, lang).time}
                     </p>
                     <p className="muted-text">
                       {gameDay.participant_count} {t("members")} ·{" "}
