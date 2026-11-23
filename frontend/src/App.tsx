@@ -12,6 +12,8 @@ import { PlayerAvatar, ReigningTitlesProvider } from "./PlayerAvatar";
 import { reigningTitles } from "./reigningTitles";
 import { removeAvatar, uploadAvatar } from "./avatarStorage";
 import { matchesMemberSearch } from "./profileUtils";
+import { motion, AnimatePresence } from "motion/react";
+import { AnimatedNumber, BottomNav, Confetti, MedalLadder } from "./ui";
 import {
   gameDayGuide,
   registrationGenerateCta,
@@ -685,6 +687,7 @@ function App() {
     Record<string, Partial<SurveyRating>>
   >({});
   const [copied, setCopied] = useState(false);
+  const [burst, setBurst] = useState(0);
   const [showGroupActions, setShowGroupActions] = useState(false);
   const [showExitOptions, setShowExitOptions] = useState(false);
   const [transferTarget, setTransferTarget] = useState("");
@@ -2406,6 +2409,55 @@ function App() {
       )}
     </div>
   );
+  // One primary button on Home, chosen by what this person can do right now.
+  const homeCta: { label: string; run: () => void } | null = (() => {
+    if (!group || !isMember) return null;
+    if (gameDay && isLive) {
+      return {
+        label: t("enterLiveGameDay"),
+        run: () => {
+          setGamePane("matches");
+          openSection("game");
+        },
+      };
+    }
+    if (
+      gameDay?.status === "upcoming" &&
+      registrationState === "out" &&
+      currentMembership &&
+      gameDay.participants.length < gameDay.participant_count
+    ) {
+      return {
+        label: t("register"),
+        run: () => {
+          setBurst((current) => current + 1);
+          void setGameDayRegistration(currentMembership.id, true);
+        },
+      };
+    }
+    const action = guide.actions[0];
+    if (action) {
+      return {
+        label: t(guideActionLabel[action]),
+        run: () => {
+          if (action !== "voteMvp" && action !== "viewResults") {
+            openSection("game");
+          }
+          runGuideAction(action);
+        },
+      };
+    }
+    if (!gameDay && isAdmin) {
+      return {
+        label: t("createGameDay"),
+        run: () => {
+          setGamePane("registration");
+          openSection("game");
+        },
+      };
+    }
+    return null;
+  })();
   const latestMessage = chatMessages[0] ?? null;
   const dayStatisticsRows: StatisticsTableRow[] = dayStats.map((row) => ({
     id: row.member.id,
@@ -2613,7 +2665,13 @@ function App() {
       </header>
 
       <div className="page-layout">
-        <main className={section === "home" ? "container app-main home-main" : "container app-main"}>
+        <motion.main
+          key={section}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: [0.23, 1, 0.32, 1] }}
+          className={section === "home" ? "container app-main home-main" : "container app-main"}
+        >
           {section === "settings" && (
             <section className="card profile-card">
               <h2>{t("myProfile")}</h2>
@@ -2728,6 +2786,14 @@ function App() {
                 </div>
               )}
               {profileError && <p className="chat-error">{profileError}</p>}
+            </section>
+          )}
+          {section === "settings" && (
+            <section className="card achievements-card">
+              <span className="coming-soon-pill">{t("comingSoon")}</span>
+              <h2>{t("achievements")}</h2>
+              <p className="muted-text">{t("achievementsHint")}</p>
+              <MedalLadder t={t} />
             </section>
           )}
           {section === "settings" && (
@@ -2924,14 +2990,31 @@ function App() {
                         <p className="home-next-date">{homeKickoff?.date}</p>
                         <p className="home-next-time">{homeKickoff?.time}</p>
                         {gameDay?.status === "upcoming" && (
-                          <div className="home-next-meta">
-                            <span>{countdownText(gameDay)}</span>
-                            <span>
-                              {gameDay.participants.length}/{gameDay.participant_count}{" "}
-                              {t("registered")} · {gameDay.waiting_list.length}{" "}
-                              {t("waiting")}
-                            </span>
-                          </div>
+                          <>
+                            <div className="home-next-meta">
+                              <span>{countdownText(gameDay)}</span>
+                              <span>
+                                <AnimatedNumber value={gameDay.participants.length} />/
+                                {gameDay.participant_count} {t("registered")} ·{" "}
+                                {gameDay.waiting_list.length} {t("waiting")}
+                              </span>
+                            </div>
+                            <div className="home-progress" aria-hidden="true">
+                              <motion.span
+                                initial={{ scaleX: 0 }}
+                                animate={{
+                                  scaleX: gameDay.participant_count
+                                    ? Math.min(
+                                        1,
+                                        gameDay.participants.length /
+                                          gameDay.participant_count
+                                      )
+                                    : 0,
+                                }}
+                                transition={{ duration: 0.7, ease: [0.23, 1, 0.32, 1] }}
+                              />
+                            </div>
+                          </>
                         )}
                         {gameDay ? (
                           <p className="home-next-you">
@@ -2952,6 +3035,15 @@ function App() {
                           </div>
                         )}
                       </>
+                    )}
+                    {homeCta && (
+                      <button
+                        type="button"
+                        className="primary-button home-cta"
+                        onClick={homeCta.run}
+                      >
+                        {homeCta.label}
+                      </button>
                     )}
                   </section>
                   {showMvpReminder && finishedGameDay && (
@@ -3155,18 +3247,21 @@ function App() {
                     ["manage", t("manage")],
                     ["chat", t("chat")],
                   ] as const
-                ).map(([key, label]) => (
+                )
+                  .filter(([key]) => key !== "manage" || isAdmin)
+                  .map(([key, label]) => (
                   <button
                     key={key}
                     type="button"
                     role="tab"
                     aria-selected={groupPane === key}
-                    className={
-                      groupPane === key ? "primary-button" : "secondary-button"
-                    }
+                    className="tab-button"
                     onClick={() => setGroupPane(key)}
                   >
                     {label}
+                    {key === "manage" && joinRequests.length > 0 && (
+                      <span className="tab-badge">{joinRequests.length}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -3477,7 +3572,14 @@ function App() {
                         <p className="muted-text">{t("noChatMessages")}</p>
                       )}
                       {chatMessages.map((message) => (
-                        <div className="chat-message" key={message.id}>
+                        <div
+                          className={
+                            message.sender_user_id === session.user.id
+                              ? "chat-message own"
+                              : "chat-message"
+                          }
+                          key={message.id}
+                        >
                           <div className="chat-message-meta">
                             <span className="player-identity">
                               <PlayerAvatar
@@ -3538,17 +3640,18 @@ function App() {
                         ["teams", t("teams")],
                         ["matches", t("matches")],
                       ] as const
-                    ).map(([key, label]) => (
+                    ).map(([key, label], index) => (
                       <button
                         key={key}
                         type="button"
                         role="tab"
                         aria-selected={gamePane === key}
-                        className={
-                          gamePane === key ? "primary-button" : "secondary-button"
-                        }
+                        className="tab-button"
                         onClick={() => setGamePane(key)}
                       >
+                        <span className="step-num" aria-hidden="true">
+                          {index + 1}
+                        </span>
                         {label}
                       </button>
                     ))}
@@ -4074,12 +4177,15 @@ function App() {
                             ? "primary-button"
                             : "secondary-button"
                         }
-                        onClick={() =>
-                          setGameDayRegistration(
+                        onClick={() => {
+                          if (registrationState === "out") {
+                            setBurst((current) => current + 1);
+                          }
+                          void setGameDayRegistration(
                             currentMembership.id,
                             registrationState === "out"
-                          )
-                        }
+                          );
+                        }}
                       >
                         {registrationState === "out"
                           ? t("register")
@@ -4087,6 +4193,35 @@ function App() {
                       </button>
                     </div>
                   )}
+                  <div className="registration-summary">
+                    <div className="registration-count">
+                      <AnimatedNumber value={gameDay.participants.length} />
+                      <small>/{gameDay.participant_count}</small>
+                    </div>
+                    <span className="muted-text">
+                      {gameDay.waiting_list.length} {t("waiting")}
+                    </span>
+                  </div>
+                  <div className="registration-slots" aria-hidden="true">
+                    {Array.from({ length: gameDay.participant_count }, (_, index) => {
+                      const slotPlayer = gameDay.participants[index];
+                      return slotPlayer ? (
+                        <motion.span
+                          key={slotPlayer.id}
+                          className="registration-slot filled"
+                          initial={{ scale: 0.3, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={{ type: "spring", stiffness: 520, damping: 24 }}
+                        >
+                          <PlayerAvatar player={slotPlayer} size="medium" />
+                        </motion.span>
+                      ) : (
+                        <span key={`empty-${index}`} className="registration-slot">
+                          {index + 1}
+                        </span>
+                      );
+                    })}
+                  </div>
                   <div className="registration-columns">
                     <div>
                       <h3>{t("registeredPlayers")}</h3>
@@ -4324,8 +4459,12 @@ function App() {
                     </div>
                   )}
                   <div className="teams-grid">
-                    {gameDay.teams.map((team) => (
-                      <div className="team-box" key={team.name}>
+                    {gameDay.teams.map((team, teamIndex) => (
+                      <div
+                        className="team-box"
+                        key={team.name}
+                        data-team-index={teamIndex % 6}
+                      >
                         <div className="team-header">
                           <h3>{currentTeamLabel(team.name)}</h3>
                           <span
@@ -4342,6 +4481,11 @@ function App() {
                               : team.players.length}
                             /{gameDay.players_per_team}
                           </span>
+                          {!editingTeams && (
+                            <span className="team-avg">
+                              ⌀ {Number(team.average_rating ?? 0).toFixed(1)}
+                            </span>
+                          )}
                         </div>
                         {isAdmin && !editingTeams && (
                           <label className="team-captain-select">
@@ -5116,6 +5260,7 @@ function App() {
                         <div className="trophy" aria-hidden="true">
                           🏆
                         </div>
+                        <Confetti scope="card" />
                         <h2>
                           {finishedGameDay.awards.champions.length > 1
                             ? t("coChampions")
@@ -5361,18 +5506,28 @@ function App() {
               )}
             </>
           )}
-        </main>
+        </motion.main>
       </div>
+      <AnimatePresence>
       {mvpVoteOpen && finishedGameDay && group && (
-        <div
+        <motion.div
+          key="mvp-sheet"
           className="mvp-modal-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
           onClick={() => setMvpVoteOpen(false)}
         >
-          <div
+          <motion.div
             className="mvp-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="mvp-vote-title"
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ duration: 0.34, ease: [0.32, 0.72, 0, 1] }}
             onClick={(event) => event.stopPropagation()}
           >
             <h2 id="mvp-vote-title">{t("voteMvp")}</h2>
@@ -5431,29 +5586,24 @@ function App() {
                 {t("cancel")}
               </button>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
-      <nav className="bottom-nav" aria-label={t("appName")}>
-        {(
+      </AnimatePresence>
+      {burst > 0 && <Confetti key={burst} scope="screen" />}
+      <BottomNav
+        ariaLabel={t("appName")}
+        active={section}
+        onSelect={(key) => openSection(key as MainSection)}
+        items={
           [
             ["home", t("navHome")],
             ["game", t("gameDay")],
             ["group", t("navGroup")],
             ["stats", t("navStats")],
           ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            className={section === key ? "bottom-nav-button active" : "bottom-nav-button"}
-            aria-current={section === key ? "page" : undefined}
-            onClick={() => openSection(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
+        }
+      />
     </div>
     </ReigningTitlesProvider>
   );
